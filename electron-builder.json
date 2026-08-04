@@ -1,0 +1,44 @@
+{
+  "appId": "com.yamanlabs.kasapos",
+  "productName": "ZUZU PET Kasa Otomasyonu POS",
+  "directories": {
+    "output": "dist"
+  },
+  "files": [
+    "electron/**/*",
+    "out/**/*",
+    "public/**/*",
+    "gmp3-server.js",
+    "package.json",
+    "node_modules/sql.js/**/*",
+    "node_modules/electron-serve/**/*",
+    "node_modules/better-sqlite3/**/*",
+    "node_modules/@google/genai/**/*"
+  ],
+  "asar": true,
+  "asarUnpack": [
+    "node_modules/sql.js/dist/sql-wasm.wasm"
+  ],
+  "win": {
+    "icon": "public/icon.ico",
+    "target": [
+      {
+        "target": "portable",
+        "arch": ["x64", "arm64"]
+      }
+    ],
+    "requestedExecutionLevel": "asInvoker"
+  },
+  "mac": {
+    "icon": "public/xuxu_logo.png",
+    "target": [
+      {
+        "target": "dmg",
+        "arch": ["x64", "arm64", "universal"]
+      }
+    ]
+  },
+  "portable": {
+    "artifactName": "ZUZU_PET_Kasa_POS_${arch}.exe"
+  }
+}
