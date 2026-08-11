@@ -9,6 +9,7 @@ interface UseCheckoutProps {
     cashFinalTotal: number;
     cardFinalTotal: number;
     cashSubtotal: number;
+    cardSubtotal: number;  // BUG-09: needed for correct % discount with card payment
     discount: number;
     discountType: 'TL' | '%';
     taxTotal: number;
@@ -17,7 +18,7 @@ interface UseCheckoutProps {
 
 export function useCheckout({
     cart, setCart, cashFinalTotal, cardFinalTotal, 
-    cashSubtotal, discount, discountType, taxTotal, onSuccess
+    cashSubtotal, cardSubtotal, discount, discountType, taxTotal, onSuccess
 }: UseCheckoutProps) {
     const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
     const [paymentMethod, setPaymentMethod] = useState<'Nakit' | 'Kredi Kartı' | 'Çoklu'>('Nakit');
@@ -41,7 +42,7 @@ export function useCheckout({
 
         setCart(prev => prev.map(item => ({
             ...item,
-            unit_price: method === 'Nakit' ? item.product.sale_price : (item.product.card_price || Math.round(item.product.sale_price * 1.05))
+            unit_price: method === 'Nakit' ? item.product.sale_price : (item.product.card_price || Number((item.product.sale_price * 1.05).toFixed(2)))
         })));
 
         if (method === 'Nakit') {
@@ -102,9 +103,11 @@ export function useCheckout({
                 posAuthCode = `MANUAL-CARD-${Math.floor(100000 + Math.random() * 900000)}`;
             }
 
+            // BUG-09: Use the correct subtotal base for percentage discounts
+            const baseSubtotal = paymentMethod === 'Kredi Kartı' ? cardSubtotal : cashSubtotal;
             await dbIPC.createSale({
                 cart_items,
-                discount: discountType === '%' ? (cashSubtotal * (discount / 100)) : discount,
+                discount: discountType === '%' ? (baseSubtotal * (discount / 100)) : discount,
                 payment_method: m1,
                 payment_amount_1: p1,
                 payment_method_2: m2,

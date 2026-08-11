@@ -17,3 +17,11 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Database & Local Files
+*.db
+*.pdf
+*.exe
+add_updater.js
+*backup*.json
+

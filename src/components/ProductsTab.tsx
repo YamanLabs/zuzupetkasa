@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Navigation, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Compass as Navigation, CheckCircle as CheckCircle2, WarningCircle as AlertCircle } from '@phosphor-icons/react';
 
 import { useProducts } from '@/hooks/useProducts';
 import ProductsHeader from './products/ProductsHeader';
@@ -32,25 +32,7 @@ export default function ProductsTab({ scannedBarcode, onResetScannedBarcode, the
                 onCategoryChange={p.setSelectedCategory}
             />
 
-            {/* Helper Banner for Arrow Key Navigation & Quick Scan */}
-            <div className={`border rounded-xl p-3 flex items-center justify-between text-xs shadow-inner ${
-                theme === 'cream' ? 'bg-amber-100/60 border-amber-300 text-amber-950' : 'bg-slate-900 border-slate-800 text-slate-300'
-            }`}>
-                <div className="flex items-center space-x-2.5">
-                    <Navigation className={`h-4 w-4 ${theme === 'cream' ? 'text-amber-700' : 'text-blue-400'}`} />
-                    <span className="font-medium">
-                        <strong>Hızlı Barkod Atama:</strong> Tabloda <strong>Yön Tuşları (↑ ↓)</strong> veya fare ile ürünü seçip <strong>barkodu doğrudan taratın</strong>. Düzenle menüsüne girmeden otomatik kaydolur.
-                    </span>
-                </div>
-                {p.selectedProductId && (
-                    <div className={`px-2.5 py-1 rounded-lg border font-bold text-[11px] flex items-center space-x-1.5 ${
-                        theme === 'cream' ? 'bg-white border-amber-300 text-amber-900 shadow-sm' : 'bg-slate-800 border-slate-700 text-amber-300'
-                    }`}>
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                        <span>Seçili: {p.products.find(prod => prod.id === p.selectedProductId)?.name}</span>
-                    </div>
-                )}
-            </div>
+
 
             {/* Toast Notification Overlay */}
             <AnimatePresence>

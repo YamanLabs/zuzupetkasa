@@ -1,5 +1,5 @@
 import React, { RefObject } from 'react';
-import { X, Check } from 'lucide-react';
+import { X, Check } from '@phosphor-icons/react';
 import { Product } from '@/lib/ipc';
 
 interface ProductModalProps {

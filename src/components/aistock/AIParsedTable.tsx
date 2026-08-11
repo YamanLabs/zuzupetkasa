@@ -1,5 +1,5 @@
 import React from 'react';
-import { PackagePlus, Sparkles, Receipt, AlertCircle, Package } from 'lucide-react';
+import { Package as PackagePlus, Sparkle as Sparkles, Receipt, WarningCircle as AlertCircle, Package, X, Barcode, ArrowsClockwise } from '@phosphor-icons/react';
 import { AIParsedItem } from '@/hooks/useAIAnalysis';
 
 interface AIParsedTableProps {
@@ -17,21 +17,23 @@ interface AIParsedTableProps {
     onCategoryChange: (index: number, newCat: string) => void;
     onItemFieldChange: (index: number, field: keyof AIParsedItem, value: any) => void;
     onCommitStock: () => void;
+    onRemoveItem: (index: number) => void;
+    onToggleMatchedStatus: (index: number) => void;
 }
 
 export default function AIParsedTable({
     theme, parsedItems, selectedItemIndex, isSaving, availableCategories, categoryMargins,
     invoiceServiceFee, totalProductQuantity, serviceFeePerUnit,
-    onSelectItem, onServiceFeeChange, onCategoryChange, onItemFieldChange, onCommitStock
+    onSelectItem, onServiceFeeChange, onCategoryChange, onItemFieldChange, onCommitStock, onRemoveItem, onToggleMatchedStatus
 }: AIParsedTableProps) {
     const isCream = theme === 'cream';
 
     return (
-        <div className={`w-full flex-1 border rounded-2xl p-3 flex flex-col space-y-3 shadow-sm transition-colors duration-200 ${
+        <div className={`w-full flex-1 min-h-0 border rounded-2xl p-3 flex flex-col space-y-3 shadow-sm transition-colors duration-200 ${
             isCream ? 'bg-white border-[#d8d1c2]' : 'bg-slate-900/90 border-slate-800'
         }`}>
             {/* Header Controls & Service Fee Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
                 <div className="flex items-center space-x-2.5">
                     <h3 className={`font-black text-sm tracking-tight ${isCream ? 'text-slate-950' : 'text-slate-100'}`}>
                         AI Tarafından Okunan Fatura Kalemleri
@@ -83,27 +85,27 @@ export default function AIParsedTable({
             </div>
 
             {/* 60 FPS Ultra-Compact Data Table */}
-            <div className={`flex-1 overflow-auto rounded-xl border shadow-sm transition-colors duration-150 ${
+            <div className={`flex-1 min-h-0 overflow-auto rounded-xl border shadow-sm transition-colors duration-150 ${
                 isCream ? 'bg-white border-[#d8d1c2]' : 'bg-slate-950 border-slate-800'
             }`}>
-                <table className="w-full text-left border-collapse min-w-[900px]">
+                <table className="w-full text-left border-collapse min-w-[920px]">
                     <thead className={`sticky top-0 border-b text-[11px] font-black uppercase tracking-wider z-10 ${
                         isCream 
                             ? 'bg-[#f4f0e6] border-[#d8d1c2] text-slate-700' 
                             : 'bg-slate-950 border-slate-800 text-slate-400'
                     }`}>
                         <tr>
-                            <th className="py-2 px-2.5 w-28 whitespace-nowrap">Barkod</th>
+                            <th className="py-2 px-2.5 w-32 whitespace-nowrap">Barkod</th>
                             <th className="py-2 px-2.5 min-w-[200px]">Ürün Adı</th>
                             <th className="py-2 px-2.5 w-32 whitespace-nowrap">Kategori</th>
                             <th className="py-2 px-2.5 w-20 text-center whitespace-nowrap">Miktar</th>
-                            <th className="py-2 px-2.5 w-24 text-right whitespace-nowrap">KDV Hariç</th>
+                            <th className="py-2 px-2.5 w-24 text-right whitespace-nowrap">Birim Fiyat</th>
                             <th className="py-2 px-2.5 w-16 text-center whitespace-nowrap">KDV %</th>
-                            <th className="py-2 px-2.5 w-24 text-right whitespace-nowrap">KDV Dahil</th>
                             <th className="py-2 px-2.5 w-24 text-right whitespace-nowrap text-amber-700 dark:text-amber-400">Efektif Alış</th>
                             <th className="py-2 px-2.5 w-16 text-center whitespace-nowrap">Kar %</th>
                             <th className="py-2 px-2.5 w-24 text-right whitespace-nowrap text-emerald-700 dark:text-emerald-400">Satış Fiyatı</th>
                             <th className="py-2 px-2.5 w-24 text-center whitespace-nowrap">Durum</th>
+                            <th className="py-2 px-1 w-10 text-center whitespace-nowrap">Kaldır</th>
                         </tr>
                     </thead>
                     <tbody className={`divide-y text-xs ${isCream ? 'divide-[#ece6da]' : 'divide-slate-800/80'}`}>
@@ -111,7 +113,7 @@ export default function AIParsedTable({
                             const isSelected = selectedItemIndex === idx;
                             const hasNoBarcode = !item.barcode;
                             const catOptions = Array.from(new Set([...availableCategories, item.category])).sort();
-                            const unitCostWithTax = item.unit_cost_with_tax || Math.round((item.unit_price_excl_tax || 0) * (1 + (item.vat_rate || 20) / 100) * 100) / 100;
+                            const unitCostWithTax = item.unit_price_excl_tax || 0;
                             const effectiveCost = item.effective_cost || Math.round((unitCostWithTax + serviceFeePerUnit) * 100) / 100;
 
                             const catObj = categoryMargins[item.category];
@@ -131,19 +133,24 @@ export default function AIParsedTable({
                                                 : 'hover:bg-slate-800/70 text-slate-100'
                                     }`}
                                 >
-                                    {/* BARKOD */}
-                                    <td className={`py-1.5 px-2.5 font-mono text-[11px] whitespace-nowrap ${
-                                        isSelected
-                                            ? isCream ? 'text-slate-950 font-extrabold' : 'text-purple-200 font-extrabold'
-                                            : isCream ? 'text-slate-600 font-medium' : 'text-slate-400'
-                                    }`}>
-                                        {hasNoBarcode ? (
-                                            <span className="bg-rose-500/20 text-rose-700 border border-rose-500/40 px-1.5 py-0.5 rounded text-[10px] font-black">
-                                                Barkodsuz
-                                            </span>
-                                        ) : (
-                                            <span>{item.barcode}</span>
-                                        )}
+                                    {/* BARKOD - Düzenlenebilir Input */}
+                                    <td className="py-1.5 px-2.5 font-mono text-[11px] whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                        <div className="flex items-center space-x-1">
+                                            <input
+                                                type="text"
+                                                placeholder="Barkod gir/okut"
+                                                value={item.barcode || ''}
+                                                onChange={(e) => onItemFieldChange(idx, 'barcode', e.target.value)}
+                                                onClick={(e) => { e.stopPropagation(); onSelectItem(idx); }}
+                                                className={`w-28 border rounded px-1.5 py-0.5 font-mono text-[11px] font-bold outline-none transition-all ${
+                                                    hasNoBarcode
+                                                        ? 'bg-rose-500/10 border-rose-400 text-rose-700 dark:text-rose-300 placeholder-rose-400/70 focus:border-purple-600'
+                                                        : isCream
+                                                            ? 'bg-white border-slate-300 text-slate-900 focus:border-purple-600'
+                                                            : 'bg-slate-800 border-slate-700 text-slate-100 focus:border-purple-400'
+                                                }`}
+                                            />
+                                        </div>
                                     </td>
 
                                     {/* ÜRÜN ADI */}
@@ -190,7 +197,7 @@ export default function AIParsedTable({
                                         {item.quantity} {item.unit}
                                     </td>
                                     
-                                    {/* KDV HARİÇ */}
+                                    {/* BİRİM FİYAT */}
                                     <td className="py-1.5 px-2.5 text-right">
                                         <input
                                             type="number"
@@ -207,12 +214,7 @@ export default function AIParsedTable({
                                         %{item.vat_rate || 20}
                                     </td>
 
-                                    {/* KDV DAHİL */}
-                                    <td className="py-1.5 px-2.5 text-right font-extrabold font-mono text-slate-600 dark:text-slate-400">
-                                        {(unitCostWithTax || 0).toFixed(2)} TL
-                                    </td>
-
-                                    {/* EFEKTİF MASAŞLI ALIŞ */}
+                                    {/* EFEKTİF MASRAFLI ALIŞ */}
                                     <td className="py-1.5 px-2.5 text-right font-black font-mono text-amber-800 dark:text-amber-400">
                                         {(effectiveCost || 0).toFixed(2)} TL
                                     </td>
@@ -236,17 +238,36 @@ export default function AIParsedTable({
                                         />
                                     </td>
 
-                                    {/* DURUM */}
-                                    <td className="py-1.5 px-2.5 text-center">
-                                        {item.matchedProduct ? (
-                                            <span className="text-[10px] bg-blue-500/20 text-blue-800 dark:text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-md font-black">
-                                                Güncelleme
-                                            </span>
-                                        ) : (
-                                            <span className="text-[10px] bg-emerald-500/20 text-emerald-900 dark:text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-md font-black">
-                                                Yeni Ürün
-                                            </span>
-                                        )}
+                                    {/* DURUM - Tıklanabilir Değiştirme Butonu */}
+                                    <td className="py-1.5 px-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                                        <button
+                                            type="button"
+                                            onClick={() => onToggleMatchedStatus(idx)}
+                                            title={item.matchedProduct ? "Tıkla: Yeni Ürün olarak kaydet" : "Tıkla: Mevcut stok ile güncelle"}
+                                            className={`text-[10px] px-2 py-0.5 rounded-md font-black border transition active:scale-95 cursor-pointer inline-flex items-center space-x-1 shadow-sm ${
+                                                item.matchedProduct
+                                                    ? 'bg-blue-500/20 text-blue-900 dark:text-blue-300 border-blue-500/40 hover:bg-blue-500/30'
+                                                    : 'bg-emerald-500/20 text-emerald-900 dark:text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+                                            }`}
+                                        >
+                                            <span>{item.matchedProduct ? 'Güncelleme' : 'Yeni Ürün'}</span>
+                                            <ArrowsClockwise strokeWidth={2.5} className="h-3 w-3 opacity-70 hover:opacity-100" />
+                                        </button>
+                                    </td>
+
+                                    {/* KALDIR / SİL BUTONU */}
+                                    <td className="py-1.5 px-1 text-center" onClick={(e) => e.stopPropagation()}>
+                                        <button
+                                            onClick={() => onRemoveItem(idx)}
+                                            title="Bu ürünü faturadan/listeden kaldır"
+                                            className={`p-1 rounded-lg transition active:scale-90 ${
+                                                isCream
+                                                    ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-100'
+                                                    : 'text-slate-500 hover:text-rose-400 hover:bg-rose-500/20'
+                                            }`}
+                                        >
+                                            <X strokeWidth={2.5} className="h-4 w-4" />
+                                        </button>
                                     </td>
                                 </tr>
                             );

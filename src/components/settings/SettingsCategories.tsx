@@ -1,5 +1,5 @@
 import React from 'react';
-import { Tag, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Tag, Plus, ArrowsClockwise as RefreshCw, Trash as Trash2 } from '@phosphor-icons/react';
 
 interface SettingsCategoriesProps {
     theme: 'cream' | 'dark';

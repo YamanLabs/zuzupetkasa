@@ -1,5 +1,5 @@
 import React from 'react';
-import { Key } from 'lucide-react';
+import { Key } from '@phosphor-icons/react';
 
 interface SettingsAIProps {
     theme: 'cream' | 'dark';

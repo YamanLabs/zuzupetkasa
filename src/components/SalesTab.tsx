@@ -29,6 +29,7 @@ export default function SalesTab({ scannedBarcode, onResetScannedBarcode, theme 
         cashFinalTotal: cartState.cashFinalTotal,
         cardFinalTotal: cartState.cardFinalTotal,
         cashSubtotal: cartState.cashSubtotal,
+        cardSubtotal: cartState.cardSubtotal,  // BUG-09: pass card subtotal
         discount: cartState.discount,
         discountType: cartState.discountType,
         taxTotal: cartState.taxTotal,

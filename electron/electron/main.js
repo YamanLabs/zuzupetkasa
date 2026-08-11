@@ -241,7 +241,7 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
             userPromptAddon = `\n        KULLANICIYA ÖZEL EK TALİMATLAR:\n        ${customPromptText.trim()}\n`;
         }
 
-        const selectedModelName = db.getSetting('gemini_model_name', '').trim() || 'gemini-3.5-flash-lite';
+        const selectedModelName = db.getSetting('gemini_model_name', '').trim() || 'gemini-2.5-flash';
 
         const ai = new GoogleGenAI({ apiKey });
         
@@ -313,22 +313,84 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
 
         contents.push(prompt);
 
-        const response = await ai.models.generateContent({
-            model: selectedModelName,
-            contents: contents,
-            config: {
-                responseMimeType: 'application/json',
-                temperature: 0.1
+        const repairAndParseJSON = (jsonStr) => {
+            if (!jsonStr || typeof jsonStr !== 'string') return null;
+            let clean = jsonStr.trim();
+            if (clean.startsWith('```json')) clean = clean.substring(7);
+            if (clean.startsWith('```')) clean = clean.substring(3);
+            if (clean.endsWith('```')) clean = clean.substring(0, clean.length - 3);
+            clean = clean.trim();
+
+            try { return JSON.parse(clean); } catch (e) {}
+
+            clean = clean.replace(/,\s*([\}\]])/g, '$1');
+            clean = clean.replace(/[\u0000-\u001F]+/g, ' ');
+
+            try { return JSON.parse(clean); } catch (e) {}
+
+            let inString = false;
+            let isEscaped = false;
+            let stack = [];
+            let repaired = '';
+
+            for (let i = 0; i < clean.length; i++) {
+                const char = clean[i];
+                if (isEscaped) { repaired += char; isEscaped = false; continue; }
+                if (char === '\\') { repaired += char; isEscaped = true; continue; }
+                if (char === '"') { inString = !inString; repaired += char; continue; }
+                if (!inString) {
+                    if (char === '{' || char === '[') stack.push(char);
+                    else if (char === '}' || char === ']') stack.pop();
+                }
+                repaired += char;
             }
-        });
+            if (inString) repaired += '"';
+            while (stack.length > 0) {
+                const open = stack.pop();
+                repaired += (open === '{' ? '}' : ']');
+            }
+            try { return JSON.parse(repaired); } catch (e) {}
 
-        let responseText = response.text.trim();
-        if (responseText.startsWith('```json')) responseText = responseText.substring(7);
-        if (responseText.startsWith('```')) responseText = responseText.substring(3);
-        if (responseText.endsWith('```')) responseText = responseText.substring(0, responseText.length - 3);
-        responseText = responseText.trim();
+            try {
+                const itemsMatch = clean.match(/"items"\s*:\s*\[([\s\S]*)/);
+                if (itemsMatch) {
+                    const itemObjects = [];
+                    const objectRegex = /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g;
+                    let match;
+                    while ((match = objectRegex.exec(itemsMatch[1])) !== null) {
+                        try { itemObjects.push(JSON.parse(match[0])); } catch (err) {}
+                    }
+                    if (itemObjects.length > 0) return { invoice_service_fee_total: 0.0, items: itemObjects };
+                }
+            } catch (e) {}
+            return null;
+        };
 
-        const parsed = JSON.parse(responseText);
+        const candidates = [selectedModelName, 'gemini-2.5-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-2.5-pro'];
+        const uniqueCandidates = Array.from(new Set(candidates.filter(Boolean)));
+        let responseText = null;
+
+        for (const candModel of uniqueCandidates) {
+            try {
+                const response = await ai.models.generateContent({
+                    model: candModel,
+                    contents: contents,
+                    config: {
+                        responseMimeType: 'application/json',
+                        temperature: 0.1,
+                        maxOutputTokens: 8192
+                    }
+                });
+                if (response && response.text) {
+                    responseText = response.text;
+                    break;
+                }
+            } catch (err) {
+                console.error(`Model ${candModel} failed:`, err.message);
+            }
+        }
+
+        const parsed = repairAndParseJSON(responseText) || { items: [], invoice_service_fee_total: 0.0 };
         const rawItems = parsed.items || [];
         let extractedServiceFee = parseFloat(parsed.invoice_service_fee_total || 0.0);
 
@@ -396,7 +458,7 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
 
             // Sale price rounds to 1 TL integer (e.g. 869.51 -> 870 TL, 869.49 -> 869 TL)
             const rawSalePrice = effectiveCost > 0 ? effectiveCost * (1 + margin / 100) : 0.0;
-            const salePrice = Math.round(rawSalePrice);
+            const salePrice = Number((rawSalePrice).toFixed(2));
 
             return {
                 name: item.name,
@@ -533,6 +595,64 @@ ipcMain.handle('ai:doubleCheckInvoice', async (event, base64Images, providedApiK
 
         const activeSaleIds = new Set(dbSales.filter(s => !['İade Edildi', 'Iade Edildi', 'Ä°ade Edildi'].includes(s.status)).map(s => s.id));
 
+        const extractGrammages = (str) => {
+            if (!str) return [];
+            const norm = normalizeName(str).replace(/,/g, '.');
+            const matches = norm.match(/\b(\d+(?:\.\d+)?)\s*(kg|g|gr|gram|ml|l|lt)\b/g);
+            if (!matches) return [];
+            return matches.map(m => {
+                const valMatch = m.match(/\d+(?:\.\d+)?/);
+                const unitMatch = m.match(/[a-z]+/);
+                if (!valMatch || !unitMatch) return m;
+                const val = parseFloat(valMatch[0]);
+                let unit = unitMatch[0];
+                if (unit === 'gr' || unit === 'gram') unit = 'g';
+                if (unit === 'lt') unit = 'l';
+                return `${val}${unit}`;
+            });
+        };
+
+        const extractFlavors = (str) => {
+            if (!str) return [];
+            const norm = normalizeName(str);
+            const map = {
+                tavuk: 'tavuk', tavuklu: 'tavuk',
+                somon: 'somon', somonlu: 'somon',
+                kuzu: 'kuzu', kuzulu: 'kuzu',
+                ordek: 'ordek', ordekli: 'ordek',
+                hindi: 'hindi', hindili: 'hindi',
+                dana: 'dana', danali: 'dana',
+                sigir: 'sigir', sigirli: 'sigir',
+                balik: 'balik', balikli: 'balik',
+                hamsi: 'hamsi', hamsili: 'hamsi',
+                karides: 'karides', karidesli: 'karides'
+            };
+            const found = [];
+            const words = norm.split(/\s+/);
+            for (const w of words) {
+                if (map[w] && !found.includes(map[w])) found.push(map[w]);
+            }
+            return found;
+        };
+
+        const isValidVariantMatch = (name1, name2) => {
+            const grams1 = extractGrammages(name1);
+            const grams2 = extractGrammages(name2);
+            if (grams1.length > 0 && grams2.length > 0) {
+                if (grams1.sort().join(',') !== grams2.sort().join(',')) {
+                    return false;
+                }
+            }
+            const flavors1 = extractFlavors(name1);
+            const flavors2 = extractFlavors(name2);
+            if (flavors1.length > 0 && flavors2.length > 0) {
+                if (flavors1.sort().join(',') !== flavors2.sort().join(',')) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
         for (const item of invoiceItems) {
             const normInvName = normalizeName(item.name);
             let matchedProd = null;
@@ -549,9 +669,11 @@ ipcMain.handle('ai:doubleCheckInvoice', async (event, base64Images, providedApiK
                         let best = null;
                         let maxCnt = 0;
                         for (const p of dbProducts) {
+                            if (!isValidVariantMatch(item.name, p.name)) continue;
                             const normP = normalizeName(p.name);
-                            const cnt = tokens.filter(tok => normP.includes(tok)).length;
-                            if (cnt >= Math.ceil(tokens.length * 0.75) && cnt > maxCnt) {
+                            const pTokens = normP.split(' ').filter(t => t.length > 1);
+                            const cnt = tokens.filter(tok => pTokens.includes(tok)).length;
+                            if (cnt >= Math.ceil(tokens.length * 0.90) && cnt > maxCnt) {
                                 maxCnt = cnt;
                                 best = p;
                             }

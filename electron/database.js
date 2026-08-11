@@ -196,15 +196,24 @@ class PosDatabase {
                 ["Bakım & Sağlık", 35.0, 40.0],
                 ["Kedi Kumu", 25.0, 30.0],
                 ["Aksesuar", 40.0, 45.0],
-                ["Genel", 30.0, 35.0]
+                ["Genel", 30.0, 35.0],
+                ["Mama Kapları", 30.0, 35.0],
+                ["Yatak", 35.0, 40.0]
             ];
             for (const [cName, cCash, cCard] of defaultCats) {
                 this.execute("INSERT OR IGNORE INTO categories (name, margin_percent, card_margin_percent) VALUES (?, ?, ?)", [cName, cCash, cCard]);
             }
         }
 
-        // Run wet food migration and stock sync
-        this.migrateWetFoodAndSyncStock();
+        // Ensure Mama Kapları and Yatak categories exist
+        this.addCategoryIfNotExist('Mama Kapları', 30.0, 35.0);
+        this.addCategoryIfNotExist('Yatak', 35.0, 40.0);
+
+        // Run wet food migration and stock sync — only once
+        const migDone = this.queryOne("SELECT value FROM settings WHERE key = 'wet_food_migration_done'");
+        if (!migDone) {
+            this.migrateWetFoodAndSyncStock();
+        }
 
         // Seed default settings
         const defaultSettings = {
@@ -213,7 +222,7 @@ class PosDatabase {
             "company_address": "Merkez Mh. Main St. No:1",
             "receipt_footer": "BIZ TERCIH ETTIGINIZ ICIN TESEKKUR EDERIZ!",
             "tax_rate": "20",
-            "gemini_api_key": "AQ.Ab8RN6KK43DqBpE1BAU8uN3Ho7sWHkkdzRrVUX2hi_jYboysRw",
+            "gemini_api_key": "",
             "currency_symbol": "TL",
             "receipt_template": "compact_minimal",
             "dark_mode": "true"
@@ -262,7 +271,7 @@ class PosDatabase {
 
                 if (isWet) {
                     const cost = parseFloat(prod.cost_price || 0.0);
-                    const newPrice = cost > 0 ? Math.round(cost * 2.0) : parseFloat(prod.sale_price || 0.0);
+                    const newPrice = cost > 0 ? Number((cost * 2.0).toFixed(2)) : parseFloat(prod.sale_price || 0.0);
                     this.execute("UPDATE products SET category = 'Yaş Mama', sale_price = ?, card_price = ? WHERE id = ?", [newPrice, newPrice, prod.id]);
                 }
             }
@@ -287,6 +296,9 @@ class PosDatabase {
             this.execute("UPDATE products SET category = 'Oyuncak' WHERE id IN (435)");
             this.execute("UPDATE products SET category = 'Mama' WHERE id IN (562, 555, 558, 537)");
 
+            // Mark migration as done so it never runs again
+            this.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('wet_food_migration_done', '1')");
+
             this.save();
         } catch (err) {
             console.error("Migration error in database.js:", err);
@@ -298,7 +310,6 @@ class PosDatabase {
         return String(str)
             .toLowerCase()
             .replace(/i̇/g, 'i')
-            .replace(/i/g, 'i')
             .replace(/ı/g, 'i')
             .replace(/ğ/g, 'g')
             .replace(/ü/g, 'u')
@@ -410,7 +421,7 @@ class PosDatabase {
                 data.category || 'Genel',
                 data.cost_price || 0.0,
                 data.sale_price || 0.0,
-                data.card_price !== undefined ? data.card_price : (data.sale_price ? Math.round(data.sale_price * 1.05) : 0.0),
+                data.card_price !== undefined ? data.card_price : (data.sale_price ? Number((data.sale_price * 1.05).toFixed(2)) : 0.0),
                 data.vat_rate !== undefined ? data.vat_rate : null,
                 data.stock_quantity || 0,
                 data.min_stock_alert || 5,
@@ -442,7 +453,7 @@ class PosDatabase {
                 data.category || 'Genel',
                 data.cost_price || 0.0,
                 data.sale_price || 0.0,
-                data.card_price !== undefined ? data.card_price : (data.sale_price ? Math.round(data.sale_price * 1.05) : 0.0),
+                data.card_price !== undefined ? data.card_price : (data.sale_price ? Number((data.sale_price * 1.05).toFixed(2)) : 0.0),
                 data.vat_rate !== undefined ? data.vat_rate : null,
                 data.stock_quantity || 0,
                 data.min_stock_alert || 5,
@@ -551,8 +562,8 @@ class PosDatabase {
         let count = 0;
         for (const p of products) {
             if (p.cost_price && p.cost_price > 0) {
-                const newSalePrice = Math.round(p.cost_price * cashMult);
-                const newCardPrice = Math.round(p.cost_price * cardMult);
+                const newSalePrice = Number((p.cost_price * cashMult).toFixed(2));
+                const newCardPrice = Number((p.cost_price * cardMult).toFixed(2));
                 this.execute("UPDATE products SET sale_price = ?, card_price = ? WHERE id = ?", [newSalePrice, newCardPrice, p.id]);
                 count++;
             }
@@ -745,7 +756,7 @@ class PosDatabase {
             dateStr = new Date().toISOString().substring(0, 10);
         }
 
-        const activeFilter = "status NOT IN ('Iade Edildi', 'İade Edildi', 'Ä°ade Edildi')";
+        const activeFilter = "status NOT IN ('Iade Edildi', '\u0130ade Edildi')";
         const summary = this.queryOne(`
             SELECT
                 COUNT(*) as total_sales_count,
@@ -754,8 +765,8 @@ class PosDatabase {
                 COALESCE(SUM(discount), 0.0) as total_discounts,
                 COALESCE(SUM(CASE WHEN payment_method = 'Nakit' THEN payment_amount_1 ELSE 0 END), 0.0) +
                 COALESCE(SUM(CASE WHEN payment_method_2 = 'Nakit' THEN payment_amount_2 ELSE 0 END), 0.0) as cash_turnover,
-                COALESCE(SUM(CASE WHEN payment_method IN ('Kredi Kartı', 'Kredi Kartı', 'Kredi KartÄ±') THEN payment_amount_1 ELSE 0 END), 0.0) +
-                COALESCE(SUM(CASE WHEN payment_method_2 IN ('Kredi Kartı', 'Kredi Kartı', 'Kredi KartÄ±') THEN payment_amount_2 ELSE 0 END), 0.0) as card_turnover
+                COALESCE(SUM(CASE WHEN payment_method = 'Kredi Kart\u0131' THEN payment_amount_1 ELSE 0 END), 0.0) +
+                COALESCE(SUM(CASE WHEN payment_method_2 = 'Kredi Kart\u0131' THEN payment_amount_2 ELSE 0 END), 0.0) as card_turnover
             FROM sales
             WHERE DATE(created_at) = DATE(?) AND ${activeFilter}
         `, [dateStr]) || {};
@@ -780,7 +791,7 @@ class PosDatabase {
             dateStr = new Date().toISOString().substring(0, 10);
         }
 
-        const activeFilter = "status NOT IN ('Iade Edildi', 'İade Edildi', 'Ä°ade Edildi')";
+        const activeFilter = "status NOT IN ('Iade Edildi', '\u0130ade Edildi')";
         const summary = this.queryOne(`
             SELECT
                 COUNT(*) as total_sales_count,
@@ -788,8 +799,8 @@ class PosDatabase {
                 COALESCE(SUM(tax_amount), 0.0) as total_tax,
                 COALESCE(SUM(CASE WHEN payment_method = 'Nakit' THEN payment_amount_1 ELSE 0 END), 0.0) +
                 COALESCE(SUM(CASE WHEN payment_method_2 = 'Nakit' THEN payment_amount_2 ELSE 0 END), 0.0) as cash_total,
-                COALESCE(SUM(CASE WHEN payment_method IN ('Kredi Kartı', 'Kredi Kartı', 'Kredi KartÄ±') THEN payment_amount_1 ELSE 0 END), 0.0) +
-                COALESCE(SUM(CASE WHEN payment_method_2 IN ('Kredi Kartı', 'Kredi Kartı', 'Kredi KartÄ±') THEN payment_amount_2 ELSE 0 END), 0.0) as credit_total
+                COALESCE(SUM(CASE WHEN payment_method = 'Kredi Kart\u0131' THEN payment_amount_1 ELSE 0 END), 0.0) +
+                COALESCE(SUM(CASE WHEN payment_method_2 = 'Kredi Kart\u0131' THEN payment_amount_2 ELSE 0 END), 0.0) as credit_total
             FROM sales
             WHERE DATE(created_at) = DATE(?) AND ${activeFilter}
         `, [dateStr]) || {};
@@ -810,6 +821,64 @@ class PosDatabase {
 
         summary.items_sold = itemsSold;
         return summary;
+    }
+
+    extractGrammages(str) {
+        if (!str) return [];
+        const norm = this.normalizeSearchText(str).replace(/,/g, '.');
+        const matches = norm.match(/\b(\d+(?:\.\d+)?)\s*(kg|g|gr|gram|ml|l|lt)\b/g);
+        if (!matches) return [];
+        return matches.map(m => {
+            const valMatch = m.match(/\d+(?:\.\d+)?/);
+            const unitMatch = m.match(/[a-z]+/);
+            if (!valMatch || !unitMatch) return m;
+            const val = parseFloat(valMatch[0]);
+            let unit = unitMatch[0];
+            if (unit === 'gr' || unit === 'gram') unit = 'g';
+            if (unit === 'lt') unit = 'l';
+            return `${val}${unit}`;
+        });
+    }
+
+    extractFlavors(str) {
+        if (!str) return [];
+        const norm = this.normalizeSearchText(str);
+        const map = {
+            tavuk: 'tavuk', tavuklu: 'tavuk',
+            somon: 'somon', somonlu: 'somon',
+            kuzu: 'kuzu', kuzulu: 'kuzu',
+            ordek: 'ordek', ordekli: 'ordek',
+            hindi: 'hindi', hindili: 'hindi',
+            dana: 'dana', danali: 'dana',
+            sigir: 'sigir', sigirli: 'sigir',
+            balik: 'balik', balikli: 'balik',
+            hamsi: 'hamsi', hamsili: 'hamsi',
+            karides: 'karides', karidesli: 'karides'
+        };
+        const found = [];
+        const words = norm.split(/\s+/);
+        for (const w of words) {
+            if (map[w] && !found.includes(map[w])) found.push(map[w]);
+        }
+        return found;
+    }
+
+    isValidVariantMatch(name1, name2) {
+        const grams1 = this.extractGrammages(name1);
+        const grams2 = this.extractGrammages(name2);
+        if (grams1.length > 0 && grams2.length > 0) {
+            if (grams1.sort().join(',') !== grams2.sort().join(',')) {
+                return false;
+            }
+        }
+        const flavors1 = this.extractFlavors(name1);
+        const flavors2 = this.extractFlavors(name2);
+        if (flavors1.length > 0 && flavors2.length > 0) {
+            if (flavors1.sort().join(',') !== flavors2.sort().join(',')) {
+                return false;
+            }
+        }
+        return true;
     }
 
     addOrUpdateStockByBarcode(barcode, name, addedStock, price = 0.0, costPrice = 0.0, unit = 'Adet', category = 'Genel') {
@@ -833,9 +902,11 @@ class PosDatabase {
                 let bestMatch = null;
                 let maxCount = 0;
                 for (const p of allProds) {
+                    if (!this.isValidVariantMatch(nameVal, p.name)) continue;
                     const normP = this.normalizeSearchText(p.name);
-                    const count = tokens.filter(t => normP.includes(t)).length;
-                    if (count >= Math.ceil(tokens.length * 0.75) && count > maxCount) {
+                    const pTokens = normP.split(' ').filter(t => t.length > 1);
+                    const count = tokens.filter(t => pTokens.includes(t)).length;
+                    if (count >= Math.ceil(tokens.length * 0.90) && count > maxCount) {
                         maxCount = count;
                         bestMatch = p;
                     }
@@ -879,10 +950,10 @@ class PosDatabase {
         if (row) {
             const newStock = row.stock_quantity + parseInt(addedStock, 10);
             const newCost = costPrice > 0 ? costPrice : row.cost_price;
-            const computedSale = Math.round(newCost * cashMultiplier);
-            const computedCard = Math.round(newCost * cardMultiplier);
+            const computedSale = Number((newCost * cashMultiplier).toFixed(2));
+            const computedCard = Number((newCost * cardMultiplier).toFixed(2));
             const newSale = price > 0 ? price : (computedSale > 0 ? computedSale : row.sale_price);
-            const newCard = computedCard > 0 ? computedCard : (row.card_price || Math.round(newSale * 1.05));
+            const newCard = computedCard > 0 ? computedCard : (row.card_price || Number((newSale * 1.05).toFixed(2)));
 
             this.execute(
                 `UPDATE products
@@ -896,10 +967,10 @@ class PosDatabase {
                 [row.id, row.name, parseInt(addedStock, 10), newStock, "AI Stok Aktarimi"]
             );
         } else {
-            const computedSale = Math.round(costPrice * cashMultiplier);
-            const computedCard = Math.round(costPrice * cardMultiplier);
+            const computedSale = Number((costPrice * cashMultiplier).toFixed(2));
+            const computedCard = Number((costPrice * cardMultiplier).toFixed(2));
             const salePrice = price > 0 ? price : (computedSale > 0 ? computedSale : 0.0);
-            const cardPrice = computedCard > 0 ? computedCard : (salePrice ? Math.round(salePrice * 1.05) : 0.0);
+            const cardPrice = computedCard > 0 ? computedCard : (salePrice ? Number((salePrice * 1.05).toFixed(2)) : 0.0);
 
             const pid = this.execute(
                 `INSERT INTO products (barcode, name, category, cost_price, sale_price, card_price, stock_quantity, min_stock_alert, unit)
@@ -944,18 +1015,21 @@ class PosDatabase {
         this.execute("DELETE FROM products");
         this.execute("DELETE FROM categories");
 
-        // Re-seed default categories on reset
+        // Re-seed default categories on reset (including card_margin_percent)
         const defaultCats = [
-            ["Mama", 30.0],
-            ["Oyuncak", 40.0],
-            ["Taşıma Çantası", 35.0],
-            ["Bakım & Sağlık", 35.0],
-            ["Kedi Kumu", 25.0],
-            ["Aksesuar", 40.0],
-            ["Genel", 30.0]
+            ["Mama", 30.0, 35.0],
+            ["Ya\u015f Mama", 100.0, 100.0],
+            ["Oyuncak", 40.0, 45.0],
+            ["Ta\u015f\u0131ma \u00c7antas\u0131", 35.0, 40.0],
+            ["Bak\u0131m & Sa\u011fl\u0131k", 35.0, 40.0],
+            ["Kedi Kumu", 25.0, 30.0],
+            ["Aksesuar", 40.0, 45.0],
+            ["Genel", 30.0, 35.0],
+            ["Mama Kaplar\u0131", 30.0, 35.0],
+            ["Yatak", 35.0, 40.0]
         ];
-        for (const [cName, cMargin] of defaultCats) {
-            this.execute("INSERT OR IGNORE INTO categories (name, margin_percent) VALUES (?, ?)", [cName, cMargin]);
+        for (const [cName, cCash, cCard] of defaultCats) {
+            this.execute("INSERT OR IGNORE INTO categories (name, margin_percent, card_margin_percent) VALUES (?, ?, ?)", [cName, cCash, cCard]);
         }
 
         if (!keepSettings) {
@@ -970,6 +1044,8 @@ class PosDatabase {
 
     exportBackup(targetPath) {
         try {
+            // Flush in-memory DB to disk before copying
+            this.save();
             if (this.db) {
                 try { this.db.run("PRAGMA wal_checkpoint(FULL);"); } catch (e) { }
             }
@@ -981,20 +1057,66 @@ class PosDatabase {
         }
     }
 
-    importBackup(sourcePath) {
+    async importBackup(sourcePath) {
         try {
             if (!fs.existsSync(sourcePath)) {
                 return { success: false, error: 'Yedek dosyası bulunamadı.' };
             }
             if (this.db) {
                 try { this.db.close(); } catch (e) { }
+                this.db = null;
             }
             fs.copyFileSync(sourcePath, this.dbPath);
-            this.init();
+            await this.init();
             return { success: true };
         } catch (err) {
             console.error('Import backup error:', err);
-            try { this.init(); } catch (e) { }
+            try { await this.init(); } catch (e) { }
+            return { success: false, error: err.message };
+        }
+    }
+
+    exportBarcodes(filePath) {
+        try {
+            // Use queryAll wrapper (sql.js doesn't support better-sqlite3's .all() API)
+            const products = this.queryAll(`SELECT name, barcode FROM products WHERE barcode IS NOT NULL AND barcode != ''`);
+            const data = JSON.stringify(products, null, 2);
+            fs.writeFileSync(filePath, data, 'utf-8');
+            return { success: true };
+        } catch (err) {
+            console.error('Export barcodes error:', err);
+            return { success: false, error: err.message };
+        }
+    }
+
+    importBarcodes(sourcePath) {
+        try {
+            if (!fs.existsSync(sourcePath)) {
+                return { success: false, error: 'JSON dosyası bulunamadı.' };
+            }
+            const data = fs.readFileSync(sourcePath, 'utf-8');
+            const items = JSON.parse(data);
+            if (!Array.isArray(items)) {
+                return { success: false, error: 'Geçersiz JSON formatı.' };
+            }
+
+            // Use execute() wrapper — sql.js doesn't support better-sqlite3's .prepare().run() / .transaction() API
+            let updatedCount = 0;
+            for (const item of items) {
+                if (item.name && item.barcode) {
+                    // Check how many rows were affected by reading before & after (sql.js workaround)
+                    const before = this.queryOne('SELECT barcode FROM products WHERE name = ?', [item.name]);
+                    this.execute(`UPDATE products SET barcode = ? WHERE name = ?`, [item.barcode, item.name]);
+                    const after = this.queryOne('SELECT barcode FROM products WHERE name = ?', [item.name]);
+                    if (after && after.barcode === item.barcode) {
+                        updatedCount++;
+                    }
+                }
+            }
+
+            return { success: true, updatedCount };
+        } catch (err) {
+            console.error('Import barcodes error:', err);
             return { success: false, error: err.message };
         }
     }

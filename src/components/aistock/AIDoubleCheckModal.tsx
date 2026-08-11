@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { ShieldCheck, X, Cpu, Save, RefreshCw, Search, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, X, Cpu, FloppyDisk as Save, ArrowsClockwise as RefreshCw, MagnifyingGlass as Search, ArrowRight, CheckCircle as CheckCircle2 } from '@phosphor-icons/react';
 
 interface AIDoubleCheckModalProps {
     theme: 'cream' | 'dark';
@@ -141,7 +141,7 @@ export default function AIDoubleCheckModal({
                 </div>
 
                 {/* Detailed Side-by-Side Comparison Grid */}
-                <div className={`flex-1 overflow-auto border rounded-xl shadow-sm transition-colors duration-150 ${
+                <div className={`flex-1 min-h-0 overflow-auto border rounded-xl shadow-sm transition-colors duration-150 ${
                     isCream ? 'bg-white border-[#d8d1c2]' : 'bg-slate-950 border-slate-800'
                 }`}>
                     {doubleCheckItems.length > 0 ? (

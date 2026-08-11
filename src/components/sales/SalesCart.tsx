@@ -1,5 +1,5 @@
-import React from 'react';
-import { ShoppingCart, Trash2, Minus, Plus, X, Banknote, CreditCard, Percent } from 'lucide-react';
+import React, { useState } from 'react';
+import { ShoppingCart, Trash as Trash2, Minus, Plus, X, Money as Banknote, CreditCard, Percent, Eye, EyeSlash } from '@phosphor-icons/react';
 import { Product } from '@/lib/ipc';
 
 interface CartItem {
@@ -40,6 +40,11 @@ export default function SalesCart({
     const isCream = theme === 'cream';
     const totalItems = cart.reduce((a, b) => a + b.quantity, 0);
 
+    const [showProfitInfo, setShowProfitInfo] = useState<boolean>(false);
+
+    const totalCost = cart.reduce((sum, item) => sum + (item.quantity * (item.product.cost_price || 0)), 0);
+    const totalProfit = cashFinalTotal - totalCost;
+
     return (
         <div className={`w-96 md:w-[420px] flex flex-col border-l transition-colors duration-200 ${
             isCream 
@@ -71,10 +76,14 @@ export default function SalesCart({
                 {cart.length > 0 && (
                     <button
                         onClick={onClearCart}
-                        className="text-xs font-bold text-rose-600 hover:text-rose-700 flex items-center space-x-1 px-2 py-1 rounded-lg hover:bg-rose-500/10 transition active:scale-95"
+                        className={`text-xs font-black px-2.5 py-1 rounded-xl transition active:scale-95 flex items-center space-x-1 ${
+                            isCream 
+                                ? 'bg-rose-100 hover:bg-rose-200 text-rose-900 border border-rose-300' 
+                                : 'bg-rose-950/60 hover:bg-rose-900/80 text-rose-200 border border-rose-800/60'
+                        }`}
                     >
                         <Trash2 strokeWidth={2} className="h-3.5 w-3.5" />
-                        <span>Temizle</span>
+                        <span>Sepeti Temizle</span>
                     </button>
                 )}
             </div>
@@ -83,58 +92,53 @@ export default function SalesCart({
             <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
                 {cart.map(item => (
                     <div 
-                        key={item.product.id} 
-                        className={`rounded-xl p-3 flex items-center justify-between border shadow-sm transition-all duration-150 ${
+                        key={item.product.id}
+                        className={`p-2.5 rounded-xl border flex items-center justify-between transition-colors shadow-sm ${
                             isCream 
-                                ? 'bg-white border-[#d8d1c2]' 
-                                : 'bg-zinc-900/90 border-zinc-800'
+                                ? 'bg-white border-[#d8d1c2] hover:border-amber-500/50' 
+                                : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
                         }`}
                     >
-                        <div className="flex-1 pr-2 min-w-0">
-                            <h5 className={`text-xs font-extrabold truncate tracking-tight ${
-                                isCream ? 'text-slate-900' : 'text-zinc-100'
-                            }`}>
+                        <div className="flex-1 min-w-0 pr-2">
+                            <h4 className={`font-extrabold text-xs truncate ${isCream ? 'text-slate-900' : 'text-zinc-100'}`}>
                                 {item.product.name}
-                            </h5>
-                            <div className={`text-[11px] font-semibold mt-0.5 ${
-                                isCream ? 'text-slate-600' : 'text-zinc-400'
-                            }`}>
-                                {item.unit_price.toFixed(2)} TL / {item.product.unit}
+                            </h4>
+                            <div className="flex items-center space-x-2 mt-0.5 text-[11px] font-extrabold">
+                                <span className={isCream ? 'text-amber-800' : 'text-amber-400'}>
+                                    {item.product.sale_price.toFixed(2)} ₺
+                                </span>
+                                <span className="opacity-30">•</span>
+                                <span className={isCream ? 'text-slate-600' : 'text-zinc-400'}>
+                                    Toplam: {(item.quantity * item.product.sale_price).toFixed(2)} ₺
+                                </span>
                             </div>
                         </div>
 
-                        {/* Quantity Controls */}
-                        <div className="flex items-center space-x-1.5 flex-shrink-0">
+                        {/* Quantity controls */}
+                        <div className="flex items-center space-x-1">
                             <button
                                 onClick={() => onUpdateQuantity(item.product.id, -1)}
-                                className={`w-6 h-6 rounded-lg flex items-center justify-center font-bold transition-transform active:scale-90 ${
-                                    isCream ? 'bg-slate-200 hover:bg-slate-300 text-slate-800' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700'
+                                className={`p-1 rounded-lg border transition active:scale-90 ${
+                                    isCream 
+                                        ? 'bg-[#ede7db] border-[#d0c8b6] text-slate-800 hover:bg-amber-600 hover:text-white' 
+                                        : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
                                 }`}
                             >
                                 <Minus strokeWidth={2.5} className="h-3 w-3" />
                             </button>
-                            
-                            <span className={`text-xs font-black w-6 text-center ${
-                                isCream ? 'text-slate-950' : 'text-white'
-                            }`}>
+                            <span className={`w-6 text-center font-black text-xs font-mono ${isCream ? 'text-slate-900' : 'text-white'}`}>
                                 {item.quantity}
                             </span>
-                            
                             <button
                                 onClick={() => onUpdateQuantity(item.product.id, 1)}
-                                className={`w-6 h-6 rounded-lg flex items-center justify-center font-bold transition-transform active:scale-90 ${
-                                    isCream ? 'bg-slate-200 hover:bg-slate-300 text-slate-800' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700'
+                                className={`p-1 rounded-lg border transition active:scale-90 ${
+                                    isCream 
+                                        ? 'bg-[#ede7db] border-[#d0c8b6] text-slate-800 hover:bg-amber-600 hover:text-white' 
+                                        : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
                                 }`}
                             >
                                 <Plus strokeWidth={2.5} className="h-3 w-3" />
                             </button>
-                            
-                            <div className={`w-16 text-right font-black text-xs font-mono ${
-                                isCream ? 'text-emerald-800' : 'text-emerald-400'
-                            }`}>
-                                {(item.quantity * item.unit_price).toFixed(2)}
-                            </div>
-                            
                             <button
                                 onClick={() => onRemoveFromCart(item.product.id)}
                                 className={`p-1 rounded transition-colors ${
@@ -173,7 +177,7 @@ export default function SalesCart({
                             onChange={(e) => onDiscountChange(parseFloat(e.target.value) || 0)}
                             placeholder="0"
                             className={`w-16 rounded-lg px-2 py-0.5 text-right text-xs font-black font-mono focus:outline-none border ${
-                                isCream ? 'bg-[#faf8f2] border-[#d8d1c2] text-slate-900' : 'bg-zinc-950 border-zinc-700 text-white'
+                                isCream ? 'bg-zinc-950 border-zinc-700 text-white' : 'bg-zinc-950 border-zinc-700 text-white'
                             }`}
                         />
                         <div className={`flex items-center p-0.5 rounded-lg border ${
@@ -205,37 +209,85 @@ export default function SalesCart({
                     </div>
                 </div>
 
-                {/* Dual Totals Breakdown (Nakit & Kart) */}
-                <div className={`grid grid-cols-2 divide-x border rounded-xl shadow-sm ${
+                {/* Dual / Triple Totals Breakdown (Nakit, Kart & Opsiyonel Maliyet/Kâr) */}
+                <div className={`grid transition-all duration-300 border rounded-xl shadow-sm overflow-hidden ${
+                    showProfitInfo ? 'grid-cols-3 divide-x' : 'grid-cols-2 divide-x'
+                } ${
                     isCream 
                         ? 'bg-white border-[#d8d1c2] divide-[#e2dcd0]' 
                         : 'bg-zinc-900 border-zinc-800 divide-zinc-800'
                 }`}>
+                    {/* NAKİT TUTAR */}
                     <div className="flex flex-col items-center justify-center p-2 text-center">
                         <span className={`text-[10px] font-extrabold uppercase tracking-wider ${
                             isCream ? 'text-slate-600' : 'text-zinc-400'
                         }`}>
                             Nakit Tutar
                         </span>
-                        <span className={`text-lg font-black mt-0.5 font-mono tracking-tight ${
+                        <span className={`text-base md:text-lg font-black mt-0.5 font-mono tracking-tight ${
                             isCream ? 'text-slate-950' : 'text-white text-glow-sm'
                         }`}>
                             {cashFinalTotal.toFixed(2)} TL
                         </span>
                     </div>
 
-                    <div className="flex flex-col items-center justify-center p-2 text-center">
+                    {/* KART TUTAR */}
+                    <div className="relative group flex flex-col items-center justify-center p-2 text-center">
+                        {!showProfitInfo && (
+                            <button
+                                type="button"
+                                onClick={() => setShowProfitInfo(true)}
+                                title="Maliyet & Kâr Bilgisini Göster"
+                                className="absolute top-1 right-1 p-1 rounded-lg opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10 transition-all duration-200"
+                            >
+                                <EyeSlash className="h-3.5 w-3.5" weight="bold" />
+                            </button>
+                        )}
+
                         <span className={`text-[10px] font-extrabold uppercase tracking-wider ${
                             isCream ? 'text-slate-600' : 'text-zinc-400'
                         }`}>
                             Kart Tutar
                         </span>
-                        <span className={`text-lg font-black mt-0.5 font-mono tracking-tight ${
+                        <span className={`text-base md:text-lg font-black mt-0.5 font-mono tracking-tight ${
                             isCream ? 'text-slate-950' : 'text-white text-glow-sm'
                         }`}>
                             {cardFinalTotal.toFixed(2)} TL
                         </span>
                     </div>
+
+                    {/* 3. KATEGORİ: MALİYET & KÂR (Rightmost Column when opened) */}
+                    {showProfitInfo && (
+                        <div className={`relative group flex flex-col items-center justify-center p-1.5 text-center ${
+                            isCream ? 'bg-purple-50/60' : 'bg-purple-950/30'
+                        }`}>
+                            <button
+                                type="button"
+                                onClick={() => setShowProfitInfo(false)}
+                                title="Maliyet & Kâr Bilgisini Gizle"
+                                className="absolute top-1 right-1 p-1 rounded-lg opacity-80 hover:opacity-100 bg-purple-500/20 text-purple-700 dark:text-purple-300 transition-all duration-200"
+                            >
+                                <Eye className="h-3.5 w-3.5" weight="bold" />
+                            </button>
+
+                            <span className={`text-[9px] font-black uppercase tracking-wider ${
+                                isCream ? 'text-purple-900' : 'text-purple-300'
+                            }`}>
+                                Maliyet & Kâr
+                            </span>
+                            <div className="flex flex-col items-center mt-0.5 space-y-0.2 text-[11px] font-mono font-black">
+                                <span className={isCream ? 'text-slate-700' : 'text-slate-300'} title="Sepet Toplam Maliyeti">
+                                    <span className="opacity-60 text-[9px]">M:</span> {totalCost.toFixed(2)} TL
+                                </span>
+                                <span 
+                                    className={totalProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}
+                                    title="Sepet Toplam Kârı"
+                                >
+                                    <span className="opacity-60 text-[9px]">K:</span> {totalProfit >= 0 ? `+${totalProfit.toFixed(2)}` : totalProfit.toFixed(2)} TL
+                                </span>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Pure Monochrome Action Buttons (F1, F2, F3) */}

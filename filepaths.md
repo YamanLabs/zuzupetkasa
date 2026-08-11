@@ -2,10 +2,10 @@
 
 ```
 nextjs-kasa/
-├── .agents/
-│   └── skills/
-│       └── design-taste-frontend/
-│           └── SKILL.md
+| - 
+│   
+│       
+│           
 ├── electron/
 │   ├── database.js
 │   ├── main.js

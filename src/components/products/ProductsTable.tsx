@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, Edit2, Trash2 } from 'lucide-react';
+import { Warning as AlertTriangle, PencilSimple as Edit2, Trash as Trash2 } from '@phosphor-icons/react';
 import { Product } from '@/lib/ipc';
 
 interface ProductsTableProps {
@@ -39,7 +39,7 @@ export default function ProductsTable({
                     {products.map(product => {
                         const isSelected = selectedProductId === product.id;
                         const hasNoBarcode = !product.barcode;
-                        const cardPrice = product.card_price || Math.round(product.sale_price * 1.05);
+                        const cardPrice = product.card_price || Number((product.sale_price * 1.05).toFixed(2));
 
                         return (
                             <tr

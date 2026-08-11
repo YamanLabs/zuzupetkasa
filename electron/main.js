@@ -6,6 +6,9 @@ const db = require('./database');
 const posTerminal = require('./pos_terminal');
 const { startGmp3Server } = require('../gmp3-server');
 const { GoogleGenAI } = require('@google/genai');
+const fs = require('fs');
+const https = require('https');
+const child_process = require('child_process');
 
 const loadURL = electronServe({ directory: path.join(__dirname, '../out') });
 
@@ -60,6 +63,86 @@ async function createWindow() {
     mainWindow.on('closed', () => {
         mainWindow = null;
     });
+
+    // Schedule 20:00 Daily Backup and Check Startup Backup
+    setupDailyBackupScheduler();
+}
+
+function getLocalBackupDir() {
+    const docsPath = app ? app.getPath('documents') : path.join(process.env.USERPROFILE || 'C:\\Users\\Default', 'Documents');
+    const backupDir = path.join(docsPath, 'ZuzuKasa_Yedekler');
+    if (!fs.existsSync(backupDir)) {
+        fs.mkdirSync(backupDir, { recursive: true });
+    }
+    return backupDir;
+}
+
+function listLocalBackups() {
+    const backupDir = getLocalBackupDir();
+    if (!fs.existsSync(backupDir)) return [];
+    const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.db'));
+    return files.map(filename => {
+        const filePath = path.join(backupDir, filename);
+        const stats = fs.statSync(filePath);
+        return {
+            filename,
+            filePath,
+            sizeBytes: stats.size,
+            mtime: stats.mtime
+        };
+    }).sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+}
+
+async function performDailyBackup() {
+    try {
+        const now = new Date();
+        const dateStr = now.toISOString().slice(0, 10);
+        const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
+        const fileName = `pos_system_${dateStr}_${timeStr}.db`;
+        
+        const backupDir = getLocalBackupDir();
+        const targetPath = path.join(backupDir, fileName);
+        
+        // BUG-05: Flush in-memory DB to disk before copying
+        db.save();
+        const res = db.exportBackup(targetPath);
+        if (res.success) {
+            console.log(`[Backup] Daily backup saved to local: ${targetPath}`);
+            db.setSetting('last_daily_backup_date', dateStr);
+            return { success: true, filePath: targetPath };
+        }
+        return res;
+    } catch (err) {
+        console.error('[Backup] performDailyBackup error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
+function setupDailyBackupScheduler() {
+    // Check if backup for today was already taken
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const lastBackupDate = db.getSetting('last_daily_backup_date', '');
+    
+    // If not backed up today and it's already past 20:00, or skipped yesterday
+    const currentHour = new Date().getHours();
+    if (lastBackupDate !== todayStr && currentHour >= 20) {
+        performDailyBackup();
+    }
+
+    // Interval check every minute for 20:00
+    setInterval(() => {
+        const now = new Date();
+        const curDate = now.toISOString().slice(0, 10);
+        const curHour = now.getHours();
+        const curMin = now.getMinutes();
+
+        if (curHour === 20 && curMin === 0) {
+            const lastDate = db.getSetting('last_daily_backup_date', '');
+            if (lastDate !== curDate) {
+                performDailyBackup();
+            }
+        }
+    }, 60000);
 }
 
 // IPC Database Handlers
@@ -90,7 +173,7 @@ ipcMain.handle('db:addOrUpdateStockByBarcode', (event, barcode, name, addedStock
 
 ipcMain.handle('db:getCategoryMargins', () => db.getCategoryMargins());
 ipcMain.handle('db:saveCategoryMargins', (event, margins) => db.saveCategoryMargins(margins));
-ipcMain.handle('db:updateCategoryProductPrices', (event, cat, margin) => db.updateCategoryProductPrices(cat, margin));
+ipcMain.handle('db:updateCategoryProductPrices', (event, cat, cashMargin, cardMargin) => db.updateCategoryProductPrices(cat, cashMargin, cardMargin));
 ipcMain.handle('db:deleteCategory', (event, categoryName) => db.deleteCategory(categoryName));
 
 ipcMain.handle('db:getSetting', (event, key, defaultValue) => db.getSetting(key, defaultValue));
@@ -118,6 +201,197 @@ ipcMain.handle('db:importBackup', async () => {
     if (canceled || !filePaths || filePaths.length === 0) return { success: false, canceled: true };
     return db.importBackup(filePaths[0]);
 });
+
+ipcMain.handle('db:exportBarcodes', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+        title: 'Barkodları Dışa Aktar',
+        defaultPath: `barkod_yedek_${today}.json`,
+        filters: [{ name: 'JSON Dosyası (*.json)', extensions: ['json'] }]
+    });
+    if (canceled || !filePath) return { success: false, canceled: true };
+    return db.exportBarcodes(filePath);
+});
+
+ipcMain.handle('db:importBarcodes', async () => {
+    const { filePaths, canceled } = await dialog.showOpenDialog(mainWindow, {
+        title: 'Barkodları İçe Aktar',
+        filters: [{ name: 'JSON Dosyası (*.json)', extensions: ['json'] }],
+        properties: ['openFile']
+    });
+    if (canceled || !filePaths || filePaths.length === 0) return { success: false, canceled: true };
+    return db.importBarcodes(filePaths[0]);
+});
+
+ipcMain.handle('db:performBackupNow', async () => {
+    return await performDailyBackup();
+});
+
+ipcMain.handle('db:listBackups', () => {
+    return listLocalBackups();
+});
+
+ipcMain.handle('db:restoreBackupFile', (event, filePath) => {
+    return db.importBackup(filePath);
+});
+
+
+// --- AUTO UPDATER IPC HANDLERS ---
+let updateDownloadPath = null;
+
+ipcMain.handle('updater:check', () => {
+    return new Promise((resolve) => {
+        const options = {
+            hostname: 'api.github.com',
+            path: '/repos/YamanLabs/zuzupetkasa/releases/latest',
+            method: 'GET',
+            headers: {
+                'User-Agent': 'zuzupetkasa-updater'
+            }
+        };
+
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const release = JSON.parse(data);
+                    const currentVersion = app.getVersion() || '2.0.0';
+                    const latestVersion = release.tag_name ? release.tag_name.replace('v', '') : null;
+                    
+                    if (latestVersion && latestVersion !== currentVersion) {
+                        const asset = release.assets && release.assets.find(a => a.name.endsWith('.exe'));
+                        
+                        resolve({
+                            hasUpdate: true,
+                            currentVersion,
+                            latestVersion,
+                            releaseNotes: release.body,
+                            releaseDate: release.published_at,
+                            downloadUrl: asset ? asset.browser_download_url : null,
+                            assetSize: asset ? asset.size : 0
+                        });
+                    } else {
+                        resolve({ hasUpdate: false, currentVersion, latestVersion });
+                    }
+                } catch (err) {
+                    console.error('Updater parse error:', err);
+                    resolve({ hasUpdate: false, error: err.message });
+                }
+            });
+        });
+
+        req.on('error', (err) => {
+            console.error('Updater request error:', err);
+            resolve({ hasUpdate: false, error: err.message });
+        });
+        
+        req.end();
+    });
+});
+
+ipcMain.handle('updater:startDownload', async (event, downloadUrl, totalBytes) => {
+    try {
+        // 1. BACKUP DATABASE BEFORE DOWNLOAD
+        const desktopPath = app.getPath('desktop');
+        const backupFolder = path.join(desktopPath, 'guncelleme oncesi database yedek');
+        if (!fs.existsSync(backupFolder)) {
+            fs.mkdirSync(backupFolder, { recursive: true });
+        }
+        
+        const pad = n => n.toString().padStart(2, '0');
+        const d = new Date();
+        const timestamp = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+        const backupFile = path.join(backupFolder, `pos_system_backup_${timestamp}.db`);
+        
+        const dbPath = path.join(app.getPath('userData'), 'pos_system.db');
+        if (fs.existsSync(dbPath)) {
+            fs.copyFileSync(dbPath, backupFile);
+            console.log('Database backed up for update:', backupFile);
+        }
+
+        // 2. DOWNLOAD UPDATE ASSET
+        updateDownloadPath = path.join(app.getPath('temp'), `zuzupetkasa_update_${timestamp}.exe`);
+        const file = fs.createWriteStream(updateDownloadPath);
+
+        return new Promise((resolve, reject) => {
+            const req = https.get(downloadUrl, (res) => {
+                if (res.statusCode === 301 || res.statusCode === 302) {
+                    // Follow redirect (GitHub releases redirect to AWS S3)
+                    https.get(res.headers.location, handleResponse).on('error', reject);
+                } else {
+                    handleResponse(res);
+                }
+
+                function handleResponse(response) {
+                    let downloadedBytes = 0;
+                    let lastEmittedTime = Date.now();
+                    let lastEmittedBytes = 0;
+
+                    response.on('data', (chunk) => {
+                        downloadedBytes += chunk.length;
+                        const now = Date.now();
+                        
+                        // Emit progress every ~250ms
+                        if (now - lastEmittedTime >= 250 || downloadedBytes === totalBytes) {
+                            const timeDiff = (now - lastEmittedTime) / 1000;
+                            const bytesDiff = downloadedBytes - lastEmittedBytes;
+                            const speedBps = timeDiff > 0 ? bytesDiff / timeDiff : 0;
+                            
+                            const percent = totalBytes ? Math.round((downloadedBytes / totalBytes) * 100) : 0;
+                            const speedFormatted = (speedBps / (1024 * 1024)).toFixed(2) + ' MB/s';
+                            const downloadedFormatted = (downloadedBytes / (1024 * 1024)).toFixed(2) + ' MB';
+                            const totalFormatted = totalBytes ? (totalBytes / (1024 * 1024)).toFixed(2) + ' MB' : '0 MB';
+                            const etaSeconds = speedBps > 0 && totalBytes ? Math.round((totalBytes - downloadedBytes) / speedBps) : 0;
+
+                            event.sender.send('updater:progress', {
+                                percent,
+                                speedFormatted,
+                                downloadedFormatted,
+                                totalFormatted,
+                                etaSeconds
+                            });
+
+                            lastEmittedTime = now;
+                            lastEmittedBytes = downloadedBytes;
+                        }
+                    });
+
+                    response.pipe(file);
+
+                    file.on('finish', () => {
+                        file.close(() => {
+                            resolve({ success: true, path: updateDownloadPath, backupPath: backupFile });
+                        });
+                    });
+                }
+            });
+
+            req.on('error', (err) => {
+                fs.unlink(updateDownloadPath, () => {});
+                reject(err);
+            });
+        });
+    } catch (err) {
+        console.error('Update download error:', err);
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('updater:install', () => {
+    if (updateDownloadPath && fs.existsSync(updateDownloadPath)) {
+        console.log('Installing update from:', updateDownloadPath);
+        const child = child_process.spawn(updateDownloadPath, [], {
+            detached: true,
+            stdio: 'ignore'
+        });
+        child.unref();
+        app.quit();
+        return true;
+    }
+    return false;
+});
+// --- END AUTO UPDATER IPC HANDLERS ---
 
 // POS Terminal Sinyal IPC Handler
 ipcMain.handle('pos:sendPaymentSignal', async (event, amountTl) => {
@@ -166,58 +440,68 @@ ipcMain.on('app:close', () => {
 
 // Thermal Printer Silent Print IPC
 ipcMain.handle('printer:printThermalReceipt', async (event, htmlContent) => {
-    try {
-        let printWindow = new BrowserWindow({
-            show: false,
-            webPreferences: { nodeIntegration: false }
-        });
+    return new Promise((resolve) => {
+        try {
+            let printWindow = new BrowserWindow({
+                show: false,
+                webPreferences: { nodeIntegration: false }
+            });
 
-        const fullHtml = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <style>
-                    @page { margin: 0; size: auto; }
-                    body {
-                        font-family: 'Courier New', Courier, monospace;
-                        width: 80mm;
-                        margin: 0;
-                        padding: 5px;
-                        color: #000;
-                        background: #fff;
-                        font-size: 12px;
+            const fullHtml = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <style>
+                        @page { margin: 0; size: auto; }
+                        body {
+                            font-family: 'Courier New', Courier, monospace;
+                            width: 80mm;
+                            margin: 0;
+                            padding: 5px;
+                            color: #000;
+                            background: #fff;
+                            font-size: 12px;
+                        }
+                        .center { text-align: center; }
+                        .right { text-align: right; }
+                        .bold { font-weight: bold; }
+                        .divider { border-bottom: 1px dashed #000; margin: 5px 0; }
+                        table { width: 100%; border-collapse: collapse; }
+                        th, td { text-align: left; padding: 2px 0; font-size: 11px; }
+                    </style>
+                </head>
+                <body>
+                    ${htmlContent}
+                </body>
+                </html>
+            `;
+
+            printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(fullHtml)}`).then(() => {
+                printWindow.webContents.print({
+                    silent: true,
+                    printBackground: true,
+                    deviceName: ''
+                }, (success, errorType) => {
+                    const result = success
+                        ? { success: true }
+                        : { success: false, error: errorType || 'Print failed' };
+                    if (printWindow && !printWindow.isDestroyed()) {
+                        printWindow.close();
                     }
-                    .center { text-align: center; }
-                    .right { text-align: right; }
-                    .bold { font-weight: bold; }
-                    .divider { border-bottom: 1px dashed #000; margin: 5px 0; }
-                    table { width: 100%; border-collapse: collapse; }
-                    th, td { text-align: left; padding: 2px 0; font-size: 11px; }
-                </style>
-            </head>
-            <body>
-                ${htmlContent}
-            </body>
-            </html>
-        `;
-
-        await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(fullHtml)}`);
-        
-        printWindow.webContents.print({
-            silent: true,
-            printBackground: true,
-            deviceName: ''
-        }, (success, errorType) => {
-            printWindow.close();
-            printWindow = null;
-        });
-
-        return { success: true };
-    } catch (err) {
-        console.error('Thermal Print Error:', err);
-        return { success: false, error: err.message };
-    }
+                    printWindow = null;
+                    resolve(result);
+                });
+            }).catch((err) => {
+                if (printWindow && !printWindow.isDestroyed()) printWindow.close();
+                printWindow = null;
+                resolve({ success: false, error: err.message });
+            });
+        } catch (err) {
+            console.error('Thermal Print Error:', err);
+            resolve({ success: false, error: err.message });
+        }
+    });
 });
 
 // Gemini AI Invoice Scanner IPC
@@ -258,33 +542,14 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
             userPromptAddon = `\n        KULLANICIYA ÖZEL EK TALİMATLAR:\n        ${customPromptText.trim()}\n`;
         }
 
-        const selectedModelName = db.getSetting('gemini_model_name', '').trim() || 'gemini-3.0-flash';
+        const isEnsembleMode = db.getSetting('ai_ensemble_mode', 'false') === 'true';
+        const model1Name = db.getSetting('gemini_model_name', '').trim() || 'gemini-2.5-flash';
+        const model2Name = db.getSetting('gemini_model_2', '').trim() || 'gemini-2.0-flash-lite';
+        const model3Name = db.getSetting('gemini_model_3', '').trim() || 'gemini-2.5-pro';
+        const mergerModelName = db.getSetting('gemini_merger_model', '').trim() || 'gemini-2.5-flash';
 
         const ai = new GoogleGenAI({ apiKey });
         
-        const contents = [];
-        for (const fileBase64 of base64Images) {
-            let mimeType = 'image/jpeg';
-            let cleanData = fileBase64;
-
-            if (fileBase64.startsWith('data:')) {
-                const parts = fileBase64.split(';');
-                if (parts.length >= 2) {
-                    mimeType = parts[0].replace('data:', '').trim(); // e.g. 'application/pdf', 'image/png', 'image/jpeg'
-                    cleanData = parts[1].replace(/^base64,/, '');
-                }
-            }
-
-            cleanData = cleanData.replace(/^data:[^;]+;base64,/, '');
-
-            contents.push({
-                inlineData: {
-                    mimeType: mimeType || 'image/jpeg',
-                    data: cleanData
-                }
-            });
-        }
-
         const allProducts = db.getAllProducts('', 'Tümü').map(p => ({
             id: p.id,
             name: p.name,
@@ -294,8 +559,7 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
 
         const prompt = `
         Bu bir petshop ürün stok faturası veya alım fişidir (e-Arşiv / e-Fatura). Gönderilen görseller tek bir fatura/fişin parçaları veya ardışık sayfaları olabilir.
-        Tüm görsellerdeki ürün kalemlerini okuyup birleştirerek aşağıdaki JSON formatında tam liste olarak çıkart.
-        Tekrarlanan veya devam eden satırları mükerrer eklemeden, tüm parçalardaki ürünlerin eksiksiz listesini oluştur.
+        DİKKAT: Gönderilen belgelerde YÜZLERCE ÜRÜN KALEMİ olabilir. Faturadaki her bir satırı (aynı ürün alt alta yazılmış olsa bile) ASLA BİRLEŞTİRME. Gördüğün her satırı, faturada yazdığı tam ismiyle ayrı ayrı, hiçbir kalemi atlamadan ve TEMBELLİK YAPMADAN JSON olarak çıkartmalısın. (DO NOT TRUNCATE)
 
         FATURA SÜTUNLARI:
         - "name": Ürünün veya Hizmetin Adı ("Mal Hizmet" sütunundan).
@@ -315,10 +579,11 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
         VERİTABANINDAKİ MEVCUT ÜRÜNLER LİSTESİ:
         ${dbProductsStr}
 
-        EŞLEŞTİRME VE BARKOD KURALI:
-        - Okuduğun faturadaki her normal ürün kalemi için "VERİTABANINDAKİ MEVCUT ÜRÜNLER LİSTESİ" içinde mantıksal bir eşleşme ara (isim benzerliği veya barkod eşleşmesi).
-        - Eğer faturadaki ürün ile veritabanındaki bir ürün aynıysa, o ürünün id'sini "matched_product_id" alanına ekle. Eğer hiç eşleşen yoksa null ver.
-        - Faturada barkod varsa veya veritabanında eşleşen ürünün barkodu varsa, onu "barcode" alanına yaz. Yoksa null yap.
+        EŞLEŞTİRME VE BARKOD KURALI (KESİN UYARI):
+        - Faturadaki "Stok Kodu", "Ürün Kodu" sütunlarındaki sayıları veya kodları ASLA "barcode" alanına YAZMA (gerçek bir 13 haneli barkoda %100 benzese bile KESİNLİKLE YAZMA).
+        - "barcode" alanını faturadaki görüntülerden okumaya çalışma! Daima null bırak. 
+        - SADECE "VERİTABANINDAKİ MEVCUT ÜRÜNLER LİSTESİ" içinde faturadaki ürünün adıyla eşleşen bir ürün bulursan, O ÜRÜNÜN (veritabanındaki) barkodunu yazabilirsin. Eğer veritabanında yoksa kesinlikle null bırak.
+        - Okuduğun faturadaki her normal ürün kalemi için "VERİTABANINDAKİ MEVCUT ÜRÜNLER LİSTESİ" içinde mantıksal bir isim eşleşmesi ara. Eşleşirse o ürünün id'sini "matched_product_id" alanına ekle. Eşleşmezse null ver.
 
         Sadece geçerli bir JSON yanıtı döndür. Başka açıklama veya markdown ekleme.
 
@@ -341,26 +606,246 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
         }
         `;
 
-        contents.push(prompt);
+        const invoiceResponseSchema = {
+            type: "OBJECT",
+            properties: {
+                invoice_service_fee_total: { type: "NUMBER" },
+                items: {
+                    type: "ARRAY",
+                    items: {
+                        type: "OBJECT",
+                        properties: {
+                            name: { type: "STRING" },
+                            category: { type: "STRING" },
+                            barcode: { type: "STRING", nullable: true },
+                            matched_product_id: { type: "INTEGER", nullable: true },
+                            quantity: { type: "NUMBER" },
+                            unit_price_excl_tax: { type: "NUMBER" },
+                            vat_rate: { type: "NUMBER" },
+                            unit: { type: "STRING" },
+                            is_service_line: { type: "BOOLEAN" }
+                        },
+                        required: ["name", "quantity", "unit_price_excl_tax", "vat_rate", "is_service_line"]
+                    }
+                }
+            },
+            required: ["invoice_service_fee_total", "items"]
+        };
 
-        const response = await ai.models.generateContent({
-            model: selectedModelName,
-            contents: contents,
-            config: {
-                responseMimeType: 'application/json',
-                temperature: 0.1
+        const batchSize = 3;
+        const imageBatches = [];
+        for (let i = 0; i < base64Images.length; i += batchSize) {
+            imageBatches.push(base64Images.slice(i, i + batchSize));
+        }
+
+        let rawItems = [];
+        let extractedServiceFee = 0.0;
+
+        const repairAndParseJSON = (jsonStr) => {
+            if (!jsonStr || typeof jsonStr !== 'string') return null;
+            
+            let clean = jsonStr.trim();
+            if (clean.startsWith('```json')) clean = clean.substring(7);
+            if (clean.startsWith('```')) clean = clean.substring(3);
+            if (clean.endsWith('```')) clean = clean.substring(0, clean.length - 3);
+            clean = clean.trim();
+
+            try {
+                return JSON.parse(clean);
+            } catch (e) {}
+
+            clean = clean.replace(/,\s*([\}\]])/g, '$1');
+            clean = clean.replace(/[\u0000-\u001F]+/g, ' ');
+
+            try {
+                return JSON.parse(clean);
+            } catch (e) {}
+
+            let inString = false;
+            let isEscaped = false;
+            let stack = [];
+            let repaired = '';
+
+            for (let i = 0; i < clean.length; i++) {
+                const char = clean[i];
+                if (isEscaped) {
+                    repaired += char;
+                    isEscaped = false;
+                    continue;
+                }
+                if (char === '\\') {
+                    repaired += char;
+                    isEscaped = true;
+                    continue;
+                }
+                if (char === '"') {
+                    inString = !inString;
+                    repaired += char;
+                    continue;
+                }
+                if (!inString) {
+                    if (char === '{' || char === '[') {
+                        stack.push(char);
+                    } else if (char === '}' || char === ']') {
+                        stack.pop();
+                    }
+                }
+                repaired += char;
             }
-        });
 
-        let responseText = response.text.trim();
-        if (responseText.startsWith('```json')) responseText = responseText.substring(7);
-        if (responseText.startsWith('```')) responseText = responseText.substring(3);
-        if (responseText.endsWith('```')) responseText = responseText.substring(0, responseText.length - 3);
-        responseText = responseText.trim();
+            if (inString) repaired += '"';
+            while (stack.length > 0) {
+                const open = stack.pop();
+                repaired += (open === '{' ? '}' : ']');
+            }
 
-        const parsed = JSON.parse(responseText);
-        const rawItems = parsed.items || [];
-        let extractedServiceFee = parseFloat(parsed.invoice_service_fee_total || 0.0);
+            try {
+                return JSON.parse(repaired);
+            } catch (e) {}
+
+            try {
+                const itemsMatch = clean.match(/"items"\s*:\s*\[([\s\S]*)/);
+                if (itemsMatch) {
+                    const itemObjects = [];
+                    const objectRegex = /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g;
+                    let match;
+                    while ((match = objectRegex.exec(itemsMatch[1])) !== null) {
+                        try {
+                            itemObjects.push(JSON.parse(match[0]));
+                        } catch (err) {}
+                    }
+                    if (itemObjects.length > 0) {
+                        return { invoice_service_fee_total: 0.0, items: itemObjects };
+                    }
+                }
+            } catch (e) {}
+
+            return null;
+        };
+
+        for (const batch of imageBatches) {
+            const contents = [];
+            for (const fileBase64 of batch) {
+                let mimeType = 'image/jpeg';
+                let cleanData = fileBase64;
+
+                if (fileBase64.startsWith('data:')) {
+                    const parts = fileBase64.split(';');
+                    if (parts.length >= 2) {
+                        mimeType = parts[0].replace('data:', '').trim();
+                        cleanData = parts[1].replace(/^base64,/, '');
+                    }
+                }
+
+                cleanData = cleanData.replace(/^data:[^;]+;base64,/, '');
+
+                contents.push({
+                    inlineData: {
+                        mimeType: mimeType || 'image/jpeg',
+                        data: cleanData
+                    }
+                });
+            }
+
+            contents.push(prompt);
+
+            const retryGenerateContent = async (requestedModel, promptContents, maxRetries = 2) => {
+                const candidates = [requestedModel, 'gemini-2.5-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-2.5-pro'];
+                const uniqueCandidates = Array.from(new Set(candidates.filter(Boolean)));
+
+                for (const candModel of uniqueCandidates) {
+                    for (let i = 0; i <= maxRetries; i++) {
+                        try {
+                            const res = await ai.models.generateContent({
+                                model: candModel,
+                                contents: promptContents,
+                                config: {
+                                    responseMimeType: 'application/json',
+                                    responseSchema: invoiceResponseSchema,
+                                    temperature: 0.1,
+                                    maxOutputTokens: 8192
+                                }
+                            });
+                            if (res && res.text) return res.text;
+                        } catch (err) {
+                            console.error(`Model ${candModel} failed (attempt ${i + 1}/${maxRetries + 1}):`, err.message);
+                            if (err.message && (err.message.includes('not found') || err.message.includes('404'))) {
+                                console.warn(`Model ${candModel} not found, switching to next candidate model.`);
+                                break;
+                            }
+                            if (i === maxRetries) break;
+                            await new Promise(resolve => setTimeout(resolve, 1500));
+                        }
+                    }
+                }
+                return null;
+            };
+
+            let responseText = "";
+
+            if (isEnsembleMode) {
+                const results = await Promise.all([
+                    retryGenerateContent(model1Name, contents),
+                    retryGenerateContent(model2Name, contents),
+                    retryGenerateContent(model3Name, contents)
+                ]);
+
+                const validResults = [];
+                for (const r of results) {
+                    if (!r) continue;
+                    const parsedObj = repairAndParseJSON(r);
+                    if (parsedObj) {
+                        validResults.push(JSON.stringify(parsedObj));
+                    } else {
+                        console.warn('Ensemble model returned invalid/unrepairable JSON, skipping.');
+                    }
+                }
+
+                if (validResults.length === 0) {
+                    throw new Error("Tüm ensemble (garanti modu) modelleri başarısız oldu veya geçersiz veri döndürdü.");
+                }
+
+                if (validResults.length === 1) {
+                    responseText = validResults[0];
+                } else {
+                    const mergerPrompt = `Aşağıda aynı faturanın farklı AI modelleri tarafından okunmuş ${validResults.length} farklı JSON sonucu bulunmaktadır.
+Lütfen bu sonuçları karşılaştır, ürün miktarlarını, birim fiyatlarını ve KDV oranlarını çapraz doğrula ve en mantıklı/doğru olan nihai veriyi tek bir JSON olarak oluştur. 
+Sonuçlarda yer alan ürün kalemlerini ASLA birbiriyle birleştirme. Faturadaki her satırın ayrı ayrı listelendiğinden emin ol. Hiçbir ürünü atlama (DO NOT TRUNCATE). Aynı JSON yapısına sadık kal.
+                    
+Sonuçlar:
+${validResults.map((r, i) => `--- Model ${i+1} ---\n${r}`).join('\n\n')}`;
+                    
+                    const mergerRes = await retryGenerateContent(mergerModelName, [mergerPrompt]);
+                    if (!mergerRes) {
+                        responseText = validResults[0];
+                    } else {
+                        responseText = mergerRes;
+                    }
+                }
+            } else {
+                const res = await retryGenerateContent(model1Name, contents);
+                if (!res) {
+                    throw new Error("AI Modeli yanıt veremedi. Lütfen API limitlerinizi kontrol edin.");
+                }
+                responseText = res;
+            }
+
+            try {
+                const parsed = repairAndParseJSON(responseText);
+                if (parsed) {
+                    if (parsed.items && Array.isArray(parsed.items)) {
+                        rawItems = rawItems.concat(parsed.items);
+                    }
+                    if (parsed.invoice_service_fee_total) {
+                        extractedServiceFee += parseFloat(parsed.invoice_service_fee_total);
+                    }
+                } else {
+                    console.warn("Batch returned unparseable JSON, skipping batch.");
+                }
+            } catch (e) {
+                console.error("Batch processing error:", e.message);
+            }
+        }
 
         // Process service lines vs sellable products
         let serviceLinesFeeTotal = 0.0;
@@ -427,7 +912,7 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
 
             // Sale price rounds to 1 TL integer (e.g. 869.51 -> 870 TL, 869.49 -> 869 TL)
             const rawSalePrice = effectiveCost > 0 ? effectiveCost * (1 + margin / 100) : 0.0;
-            const salePrice = Math.round(rawSalePrice);
+            const salePrice = Number((rawSalePrice).toFixed(2));
 
             return {
                 name: item.name,
@@ -565,6 +1050,64 @@ ipcMain.handle('ai:doubleCheckInvoice', async (event, base64Images, providedApiK
 
         const activeSaleIds = new Set(dbSales.filter(s => !['İade Edildi', 'Iade Edildi', 'Ä°ade Edildi'].includes(s.status)).map(s => s.id));
 
+        const extractGrammages = (str) => {
+            if (!str) return [];
+            const norm = normalizeName(str).replace(/,/g, '.');
+            const matches = norm.match(/\b(\d+(?:\.\d+)?)\s*(kg|g|gr|gram|ml|l|lt)\b/g);
+            if (!matches) return [];
+            return matches.map(m => {
+                const valMatch = m.match(/\d+(?:\.\d+)?/);
+                const unitMatch = m.match(/[a-z]+/);
+                if (!valMatch || !unitMatch) return m;
+                const val = parseFloat(valMatch[0]);
+                let unit = unitMatch[0];
+                if (unit === 'gr' || unit === 'gram') unit = 'g';
+                if (unit === 'lt') unit = 'l';
+                return `${val}${unit}`;
+            });
+        };
+
+        const extractFlavors = (str) => {
+            if (!str) return [];
+            const norm = normalizeName(str);
+            const map = {
+                tavuk: 'tavuk', tavuklu: 'tavuk',
+                somon: 'somon', somonlu: 'somon',
+                kuzu: 'kuzu', kuzulu: 'kuzu',
+                ordek: 'ordek', ordekli: 'ordek',
+                hindi: 'hindi', hindili: 'hindi',
+                dana: 'dana', danali: 'dana',
+                sigir: 'sigir', sigirli: 'sigir',
+                balik: 'balik', balikli: 'balik',
+                hamsi: 'hamsi', hamsili: 'hamsi',
+                karides: 'karides', karidesli: 'karides'
+            };
+            const found = [];
+            const words = norm.split(/\s+/);
+            for (const w of words) {
+                if (map[w] && !found.includes(map[w])) found.push(map[w]);
+            }
+            return found;
+        };
+
+        const isValidVariantMatch = (name1, name2) => {
+            const grams1 = extractGrammages(name1);
+            const grams2 = extractGrammages(name2);
+            if (grams1.length > 0 && grams2.length > 0) {
+                if (grams1.sort().join(',') !== grams2.sort().join(',')) {
+                    return false;
+                }
+            }
+            const flavors1 = extractFlavors(name1);
+            const flavors2 = extractFlavors(name2);
+            if (flavors1.length > 0 && flavors2.length > 0) {
+                if (flavors1.sort().join(',') !== flavors2.sort().join(',')) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
         for (const item of invoiceItems) {
             const normInvName = normalizeName(item.name);
             let matchedProd = null;
@@ -581,9 +1124,11 @@ ipcMain.handle('ai:doubleCheckInvoice', async (event, base64Images, providedApiK
                         let best = null;
                         let maxCnt = 0;
                         for (const p of dbProducts) {
+                            if (!isValidVariantMatch(item.name, p.name)) continue;
                             const normP = normalizeName(p.name);
-                            const cnt = tokens.filter(tok => normP.includes(tok)).length;
-                            if (cnt >= Math.ceil(tokens.length * 0.75) && cnt > maxCnt) {
+                            const pTokens = normP.split(' ').filter(t => t.length > 1);
+                            const cnt = tokens.filter(tok => pTokens.includes(tok)).length;
+                            if (cnt >= Math.ceil(tokens.length * 0.90) && cnt > maxCnt) {
                                 maxCnt = cnt;
                                 best = p;
                             }

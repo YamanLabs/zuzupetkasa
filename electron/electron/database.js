@@ -244,7 +244,7 @@ class PosDatabase {
 
                 if (isWet) {
                     const cost = parseFloat(prod.cost_price || 0.0);
-                    const newPrice = cost > 0 ? Math.round(cost * 2.0) : parseFloat(prod.sale_price || 0.0);
+                    const newPrice = cost > 0 ? Number((cost * 2.0).toFixed(2)) : parseFloat(prod.sale_price || 0.0);
                     this.execute("UPDATE products SET category = 'Yaş Mama', sale_price = ?, card_price = ? WHERE id = ?", [newPrice, newPrice, prod.id]);
                 }
             }
@@ -392,7 +392,7 @@ class PosDatabase {
                 data.category || 'Genel',
                 data.cost_price || 0.0,
                 data.sale_price || 0.0,
-                data.card_price !== undefined ? data.card_price : (data.sale_price ? Math.round(data.sale_price * 1.05) : 0.0),
+                data.card_price !== undefined ? data.card_price : (data.sale_price ? Number((data.sale_price * 1.05).toFixed(2)) : 0.0),
                 data.vat_rate !== undefined ? data.vat_rate : null,
                 data.stock_quantity || 0,
                 data.min_stock_alert || 5,
@@ -424,7 +424,7 @@ class PosDatabase {
                 data.category || 'Genel',
                 data.cost_price || 0.0,
                 data.sale_price || 0.0,
-                data.card_price !== undefined ? data.card_price : (data.sale_price ? Math.round(data.sale_price * 1.05) : 0.0),
+                data.card_price !== undefined ? data.card_price : (data.sale_price ? Number((data.sale_price * 1.05).toFixed(2)) : 0.0),
                 data.vat_rate !== undefined ? data.vat_rate : null,
                 data.stock_quantity || 0,
                 data.min_stock_alert || 5,
@@ -533,8 +533,8 @@ class PosDatabase {
         let count = 0;
         for (const p of products) {
             if (p.cost_price && p.cost_price > 0) {
-                const newSalePrice = Math.round(p.cost_price * cashMult);
-                const newCardPrice = Math.round(p.cost_price * cardMult);
+                const newSalePrice = Number((p.cost_price * cashMult).toFixed(2));
+                const newCardPrice = Number((p.cost_price * cardMult).toFixed(2));
                 this.execute("UPDATE products SET sale_price = ?, card_price = ? WHERE id = ?", [newSalePrice, newCardPrice, p.id]);
                 count++;
             }
@@ -794,6 +794,64 @@ class PosDatabase {
         return summary;
     }
 
+    extractGrammages(str) {
+        if (!str) return [];
+        const norm = this.normalizeSearchText(str).replace(/,/g, '.');
+        const matches = norm.match(/\b(\d+(?:\.\d+)?)\s*(kg|g|gr|gram|ml|l|lt)\b/g);
+        if (!matches) return [];
+        return matches.map(m => {
+            const valMatch = m.match(/\d+(?:\.\d+)?/);
+            const unitMatch = m.match(/[a-z]+/);
+            if (!valMatch || !unitMatch) return m;
+            const val = parseFloat(valMatch[0]);
+            let unit = unitMatch[0];
+            if (unit === 'gr' || unit === 'gram') unit = 'g';
+            if (unit === 'lt') unit = 'l';
+            return `${val}${unit}`;
+        });
+    }
+
+    extractFlavors(str) {
+        if (!str) return [];
+        const norm = this.normalizeSearchText(str);
+        const map = {
+            tavuk: 'tavuk', tavuklu: 'tavuk',
+            somon: 'somon', somonlu: 'somon',
+            kuzu: 'kuzu', kuzulu: 'kuzu',
+            ordek: 'ordek', ordekli: 'ordek',
+            hindi: 'hindi', hindili: 'hindi',
+            dana: 'dana', danali: 'dana',
+            sigir: 'sigir', sigirli: 'sigir',
+            balik: 'balik', balikli: 'balik',
+            hamsi: 'hamsi', hamsili: 'hamsi',
+            karides: 'karides', karidesli: 'karides'
+        };
+        const found = [];
+        const words = norm.split(/\s+/);
+        for (const w of words) {
+            if (map[w] && !found.includes(map[w])) found.push(map[w]);
+        }
+        return found;
+    }
+
+    isValidVariantMatch(name1, name2) {
+        const grams1 = this.extractGrammages(name1);
+        const grams2 = this.extractGrammages(name2);
+        if (grams1.length > 0 && grams2.length > 0) {
+            if (grams1.sort().join(',') !== grams2.sort().join(',')) {
+                return false;
+            }
+        }
+        const flavors1 = this.extractFlavors(name1);
+        const flavors2 = this.extractFlavors(name2);
+        if (flavors1.length > 0 && flavors2.length > 0) {
+            if (flavors1.sort().join(',') !== flavors2.sort().join(',')) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     addOrUpdateStockByBarcode(barcode, name, addedStock, price = 0.0, costPrice = 0.0, unit = 'Adet', category = 'Genel') {
         const barcodeVal = barcode && barcode.trim() ? barcode.trim() : null;
         const nameVal = name ? name.trim() : '';
@@ -815,9 +873,11 @@ class PosDatabase {
                 let bestMatch = null;
                 let maxCount = 0;
                 for (const p of allProds) {
+                    if (!this.isValidVariantMatch(nameVal, p.name)) continue;
                     const normP = this.normalizeSearchText(p.name);
-                    const count = tokens.filter(t => normP.includes(t)).length;
-                    if (count >= Math.ceil(tokens.length * 0.75) && count > maxCount) {
+                    const pTokens = normP.split(' ').filter(t => t.length > 1);
+                    const count = tokens.filter(t => pTokens.includes(t)).length;
+                    if (count >= Math.ceil(tokens.length * 0.90) && count > maxCount) {
                         maxCount = count;
                         bestMatch = p;
                     }
@@ -861,10 +921,10 @@ class PosDatabase {
         if (row) {
             const newStock = row.stock_quantity + parseInt(addedStock, 10);
             const newCost = costPrice > 0 ? costPrice : row.cost_price;
-            const computedSale = Math.round(newCost * cashMultiplier);
-            const computedCard = Math.round(newCost * cardMultiplier);
+            const computedSale = Number((newCost * cashMultiplier).toFixed(2));
+            const computedCard = Number((newCost * cardMultiplier).toFixed(2));
             const newSale = price > 0 ? price : (computedSale > 0 ? computedSale : row.sale_price);
-            const newCard = computedCard > 0 ? computedCard : (row.card_price || Math.round(newSale * 1.05));
+            const newCard = computedCard > 0 ? computedCard : (row.card_price || Number((newSale * 1.05).toFixed(2)));
 
             this.execute(
                 `UPDATE products
@@ -878,10 +938,10 @@ class PosDatabase {
                 [row.id, row.name, parseInt(addedStock, 10), newStock, "AI Stok Aktarimi"]
             );
         } else {
-            const computedSale = Math.round(costPrice * cashMultiplier);
-            const computedCard = Math.round(costPrice * cardMultiplier);
+            const computedSale = Number((costPrice * cashMultiplier).toFixed(2));
+            const computedCard = Number((costPrice * cardMultiplier).toFixed(2));
             const salePrice = price > 0 ? price : (computedSale > 0 ? computedSale : 0.0);
-            const cardPrice = computedCard > 0 ? computedCard : (salePrice ? Math.round(salePrice * 1.05) : 0.0);
+            const cardPrice = computedCard > 0 ? computedCard : (salePrice ? Number((salePrice * 1.05).toFixed(2)) : 0.0);
 
             const pid = this.execute(
                 `INSERT INTO products (barcode, name, category, cost_price, sale_price, card_price, stock_quantity, min_stock_alert, unit)

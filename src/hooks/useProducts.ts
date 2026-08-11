@@ -85,22 +85,13 @@ export function useProducts(scannedBarcode?: string, onResetScannedBarcode?: () 
             const code = scannedBarcode.trim();
             if (showModal) {
                 setFormData(prev => ({ ...prev, barcode: code }));
-            } else if (selectedProductId !== null) {
-                const targetProduct = products.find(p => p.id === selectedProductId);
-                if (targetProduct) {
-                    assignBarcodeInstantly(targetProduct, code);
-                } else {
-                    setSearchQuery(code);
-                }
-            } else if (products.length > 0) {
-                assignBarcodeInstantly(products[0], code);
             } else {
                 setSearchQuery(code);
             }
 
             if (onResetScannedBarcode) onResetScannedBarcode();
         }
-    }, [scannedBarcode]);
+    }, [scannedBarcode, showModal]);
 
     const loadData = async () => {
         let prods = await dbIPC.getProducts(searchQuery, selectedCategory);
@@ -128,7 +119,7 @@ export function useProducts(scannedBarcode?: string, onResetScannedBarcode?: () 
         if (cost <= 0) return '';
         const marginObj = categoryMargins[catName];
         const cashMargin = marginObj ? (typeof marginObj === 'object' ? marginObj.cash : Number(marginObj)) : 30;
-        return Math.round(cost * (1 + cashMargin / 100));
+        return Number((cost * (1 + cashMargin / 100)).toFixed(2));
     };
 
     const handleCostPriceChange = (val: string) => {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Tag, AlertTriangle, Plus, Search } from 'lucide-react';
+import { Tag, Warning as AlertTriangle, Plus, MagnifyingGlass as Search } from '@phosphor-icons/react';
 
 interface ProductsHeaderProps {
     theme: 'cream' | 'dark';

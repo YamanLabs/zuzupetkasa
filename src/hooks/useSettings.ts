@@ -37,7 +37,7 @@ export function useSettings(onThemeChange?: (theme: 'cream' | 'dark') => void) {
     const [newCategoryCardMargin, setNewCategoryCardMargin] = useState<string>('35');
     const [updatingCat, setUpdatingCat] = useState<string | null>(null);
 
-    const [activeTab, setActiveTab] = useState<'categories' | 'pos' | 'company' | 'ai' | 'system'>('categories');
+    const [activeTab, setActiveTab] = useState<'categories' | 'pos' | 'company' | 'ai' | 'system' | 'service'>('categories');
 
     useEffect(() => {
         loadSettings();
@@ -176,6 +176,39 @@ export function useSettings(onThemeChange?: (theme: 'cream' | 'dark') => void) {
         }
     };
 
+    const handleExportBarcodes = async () => {
+        soundFX.playClick();
+        try {
+            const res = await dbIPC.exportBarcodes();
+            if (res?.canceled) return;
+            if (res?.success) {
+                alert('✓ Barkodlar başarıyla dışa aktarıldı!');
+                soundFX.playSuccess();
+            } else {
+                alert(`Hata: ${res?.error || 'Barkodlar dışa aktarılamadı.'}`);
+            }
+        } catch (e: any) {
+            alert(`Hata: ${e.message}`);
+        }
+    };
+
+    const handleImportBarcodes = async () => {
+        soundFX.playClick();
+        if (!confirm('DİKKAT: Seçtiğiniz dosyadaki barkodlar isim eşleşmesine göre mevcut ürünlerin üzerine yazılacaktır. İşleme devam edilsin mi?')) return;
+        try {
+            const res = await dbIPC.importBarcodes();
+            if (res?.canceled) return;
+            if (res?.success) {
+                alert(`✓ ${res?.updatedCount} ürünün barkodu başarıyla güncellendi!`);
+                soundFX.playSuccess();
+            } else {
+                alert(`Hata: ${res?.error || 'Barkodlar içe aktarılamadı.'}`);
+            }
+        } catch (e: any) {
+            alert(`Hata: ${e.message}`);
+        }
+    };
+
     return {
         soundEnabled, toggleSound,
         settings, setSettings,
@@ -195,6 +228,7 @@ export function useSettings(onThemeChange?: (theme: 'cream' | 'dark') => void) {
         activeTab, setActiveTab,
         handleMarginChange, handleAddCategory, handleDeleteCategory,
         handleBatchUpdatePrices, handleSave, handleThemeSelect,
-        handleClearDatabase, handleExportBackup, handleImportBackup
+        handleClearDatabase, handleExportBackup, handleImportBackup,
+        handleExportBarcodes, handleImportBarcodes
     };
 }

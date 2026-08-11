@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Search, Plus, Tag, AlertCircle, ShoppingBag, X } from 'lucide-react';
+import { MagnifyingGlass as Search, Plus, Tag, WarningCircle as AlertCircle, ShoppingBag, X } from '@phosphor-icons/react';
 import { Product } from '@/lib/ipc';
 
 interface SalesProductTableProps {
@@ -133,7 +133,7 @@ export default function SalesProductTable({
                             const isLowStock = product.stock_quantity <= product.min_stock_alert;
                             const hasNoBarcode = !product.barcode;
                             const isAiInvoiceCategory = product.category && product.category.toLowerCase().includes('ai fatura');
-                            const cardPrice = product.card_price || Math.round(product.sale_price * 1.05);
+                            const cardPrice = product.card_price || Number((product.sale_price * 1.05).toFixed(2));
 
                             return (
                                 <tr

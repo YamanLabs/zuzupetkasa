@@ -1,5 +1,5 @@
 import React from 'react';
-import { Store, Eye } from 'lucide-react';
+import { Storefront as Store, Eye } from '@phosphor-icons/react';
 
 interface SettingsCompanyProps {
     theme: 'cream' | 'dark';

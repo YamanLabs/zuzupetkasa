@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Sliders, Tag, FileText, Plus, Trash2, Save, ArrowRight, X } from 'lucide-react';
+import { SlidersHorizontal as Sliders, Tag, FileText, Plus, Trash as Trash2, FloppyDisk as Save, ArrowRight, X } from '@phosphor-icons/react';
 import { AICustomRule } from '@/hooks/useAIRules';
 
 interface AIRulesModalProps {

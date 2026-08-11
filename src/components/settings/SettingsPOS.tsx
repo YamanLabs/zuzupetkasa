@@ -1,5 +1,5 @@
 import React from 'react';
-import { CreditCard, Link2 } from 'lucide-react';
+import { CreditCard, Link as Link2 } from '@phosphor-icons/react';
 
 interface SettingsPOSProps {
     theme: 'cream' | 'dark';

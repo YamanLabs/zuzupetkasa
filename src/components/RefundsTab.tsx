@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { dbIPC, Sale, SaleItem } from '@/lib/ipc';
 import { soundFX } from '@/lib/sound-effects';
-import { Undo2, Search, Receipt, Calendar, CheckCircle2, AlertCircle, RefreshCw, X, Trash2, Filter } from 'lucide-react';
+import { ArrowUUpLeft as Undo2, MagnifyingGlass as Search, Receipt, Calendar, CheckCircle as CheckCircle2, WarningCircle as AlertCircle, ArrowsClockwise as RefreshCw, X, Trash as Trash2, Funnel as Filter } from '@phosphor-icons/react';
 
 interface RefundsTabProps {
     theme?: 'cream' | 'dark';

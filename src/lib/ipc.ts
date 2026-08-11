@@ -93,7 +93,7 @@ let webInMemorySettings: Record<string, string> = {
     company_address: "Merkez Mh. Main St. No:1",
     receipt_footer: "BIZ TERCIH ETTIGINIZ ICIN TESEKKUR EDERIZ!",
     tax_rate: "20",
-    gemini_api_key: "AQ.Ab8RN6KK43DqBpE1BAU8uN3Ho7sWHkkdzRrVUX2hi_jYboysRw",
+    gemini_api_key: "",
     currency_symbol: "TL",
     dark_mode: "true"
 };
@@ -117,7 +117,6 @@ export function normalizeSearchText(str: string): string {
     return String(str)
         .toLowerCase()
         .replace(/i̇/g, 'i')
-        .replace(/i/g, 'i')
         .replace(/ı/g, 'i')
         .replace(/ğ/g, 'g')
         .replace(/ü/g, 'u')
@@ -238,7 +237,7 @@ export const dbIPC = {
         if (isElectronAvailable()) {
             return await (window as any).electronAPI.db.createSale(saleData);
         }
-        const newId = webInMemorySales.length + 1;
+        const newId = Math.max(0, ...webInMemorySales.map(s => s.id)) + 1;
         const receipt_no = `POS-${new Date().toISOString().substring(0,10).replace(/-/g,'')}-${String(newId).padStart(4, '0')}`;
         let total = 0;
         for (const item of saleData.cart_items) {
@@ -421,8 +420,8 @@ export const dbIPC = {
         let count = 0;
         webInMemoryProducts.forEach(p => {
             if (p.category === category && p.cost_price > 0) {
-                p.sale_price = Math.round(p.cost_price * cashM);
-                p.card_price = Math.round(p.cost_price * cardM);
+                p.sale_price = Number((p.cost_price * cashM).toFixed(2));
+                p.card_price = Number((p.cost_price * cardM).toFixed(2));
                 count++;
             }
         });
@@ -510,11 +509,46 @@ export const dbIPC = {
         }
     },
 
-    async importBackup(): Promise<{ success: boolean; error?: string; canceled?: boolean }> {
-        if (isElectronAvailable() && (window as any).electronAPI?.db?.importBackup) {
+    async importBackup(): Promise<{ success: boolean; canceled?: boolean; error?: string }> {
+        if (typeof window !== 'undefined' && (window as any).electronAPI) {
             return await (window as any).electronAPI.db.importBackup();
         }
-        return { success: false, error: "Tarayıcı modunda veritabanı içe aktarma desteklenmemektedir." };
+        return { success: true };
+    },
+
+    async exportBarcodes(): Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }> {
+        if (typeof window !== 'undefined' && (window as any).electronAPI) {
+            return await (window as any).electronAPI.db.exportBarcodes();
+        }
+        return { success: true };
+    },
+
+    async importBarcodes(): Promise<{ success: boolean; canceled?: boolean; updatedCount?: number; error?: string }> {
+        if (typeof window !== 'undefined' && (window as any).electronAPI) {
+            return await (window as any).electronAPI.db.importBarcodes();
+        }
+        return { success: true, updatedCount: 0 };
+    },
+
+    async performBackupNow(): Promise<{ success: boolean; filePath?: string; error?: string }> {
+        if (isElectronAvailable() && (window as any).electronAPI?.db?.performBackupNow) {
+            return await (window as any).electronAPI.db.performBackupNow();
+        }
+        return { success: false, error: "Tarayıcı ortamında yedekleme simülasyonu çalıştırılamıyor." };
+    },
+
+    async listBackups(): Promise<Array<{ filename: string; filePath: string; sizeBytes: number; mtime: Date }>> {
+        if (isElectronAvailable() && (window as any).electronAPI?.db?.listBackups) {
+            return await (window as any).electronAPI.db.listBackups();
+        }
+        return [];
+    },
+
+    async restoreBackupFile(filePath: string): Promise<{ success: boolean; error?: string }> {
+        if (isElectronAvailable() && (window as any).electronAPI?.db?.restoreBackupFile) {
+            return await (window as any).electronAPI.db.restoreBackupFile(filePath);
+        }
+        return { success: false, error: "Tarayıcı ortamında veritabanı geri yüklenemez." };
     }
 };
 

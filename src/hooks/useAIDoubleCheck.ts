@@ -4,7 +4,7 @@ import { soundFX } from '@/lib/sound-effects';
 
 export function useAIDoubleCheck() {
     const [showDoubleCheckModal, setShowDoubleCheckModal] = useState<boolean>(false);
-    const [geminiModelName, setGeminiModelName] = useState<string>('gemini-3.5-flash-lite');
+    const [geminiModelName, setGeminiModelName] = useState<string>('gemini-2.5-flash');
     const [isCheckingDoubleCheck, setIsCheckingDoubleCheck] = useState<boolean>(false);
     const [doubleCheckReport, setDoubleCheckReport] = useState<string>('');
     const [doubleCheckSummary, setDoubleCheckSummary] = useState<any>(null);

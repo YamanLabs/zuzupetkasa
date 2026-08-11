@@ -52,7 +52,7 @@ export function useCart() {
     };
 
     const cashSubtotal = cart.reduce((sum, item) => sum + (item.quantity * item.product.sale_price), 0);
-    const cardSubtotal = cart.reduce((sum, item) => sum + (item.quantity * (item.product.card_price || Math.round(item.product.sale_price * 1.05))), 0);
+    const cardSubtotal = cart.reduce((sum, item) => sum + (item.quantity * (item.product.card_price || Number((item.product.sale_price * 1.05).toFixed(2)))), 0);
 
     const cashDiscountAmount = discountType === '%' ? (cashSubtotal * (discount / 100)) : discount;
     const cardDiscountAmount = discountType === '%' ? (cardSubtotal * (discount / 100)) : discount;

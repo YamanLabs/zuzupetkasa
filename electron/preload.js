@@ -24,14 +24,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
             ipcRenderer.invoke('db:addOrUpdateStockByBarcode', barcode, name, addedStock, price, costPrice, unit, category),
         getCategoryMargins: () => ipcRenderer.invoke('db:getCategoryMargins'),
         saveCategoryMargins: (margins) => ipcRenderer.invoke('db:saveCategoryMargins', margins),
-        updateCategoryProductPrices: (category, marginPercent) => ipcRenderer.invoke('db:updateCategoryProductPrices', category, marginPercent),
+        updateCategoryProductPrices: (category, cashMargin, cardMargin) => ipcRenderer.invoke('db:updateCategoryProductPrices', category, cashMargin, cardMargin),
         deleteCategory: (category) => ipcRenderer.invoke('db:deleteCategory', category),
         getSetting: (key, defaultValue) => ipcRenderer.invoke('db:getSetting', key, defaultValue),
         setSetting: (key, value) => ipcRenderer.invoke('db:setSetting', key, value),
         getSettings: () => ipcRenderer.invoke('db:getSettings'),
         clearEntireDatabase: (keepSettings) => ipcRenderer.invoke('db:clearEntireDatabase', keepSettings),
         exportBackup: () => ipcRenderer.invoke('db:exportBackup'),
-        importBackup: () => ipcRenderer.invoke('db:importBackup')
+        importBackup: () => ipcRenderer.invoke('db:importBackup'),
+        exportBarcodes: () => ipcRenderer.invoke('db:exportBarcodes'),
+        importBarcodes: () => ipcRenderer.invoke('db:importBarcodes'),
+        performBackupNow: () => ipcRenderer.invoke('db:performBackupNow'),
+        listBackups: () => ipcRenderer.invoke('db:listBackups'),
+        restoreBackupFile: (filePath) => ipcRenderer.invoke('db:restoreBackupFile', filePath)
     },
 
     // POS Cihazı Sinyal API
@@ -51,5 +56,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // App Control
     minimizeWindow: () => ipcRenderer.send('app:minimize'),
     maximizeWindow: () => ipcRenderer.send('app:maximize'),
-    closeWindow: () => ipcRenderer.send('app:close')
+    closeWindow: () => ipcRenderer.send('app:close'),
+
+    // Auto Updater API
+    updater: {
+        check: () => ipcRenderer.invoke('updater:check'),
+        startDownload: (downloadUrl, assetSize) => ipcRenderer.invoke('updater:startDownload', downloadUrl, assetSize),
+        install: () => ipcRenderer.invoke('updater:install'),
+        onProgress: (callback) => {
+            ipcRenderer.on('updater:progress', (event, data) => callback(data));
+            return () => ipcRenderer.removeAllListeners('updater:progress');
+        }
+    }
 });

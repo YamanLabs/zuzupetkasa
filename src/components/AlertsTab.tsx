@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { dbIPC, Product, StockLog } from '@/lib/ipc';
-import { AlertOctagon, PlusCircle, History, PackageCheck, RefreshCw, X, TrendingDown, Minus, TrendingUp } from 'lucide-react';
+import { WarningOctagon as AlertOctagon, PlusCircle, ClockCounterClockwise as History, Package as PackageCheck, ArrowsClockwise as RefreshCw, X, TrendDown as TrendingDown, Minus, TrendUp as TrendingUp } from '@phosphor-icons/react';
 
 interface AlertsTabProps {
     theme?: 'cream' | 'dark';

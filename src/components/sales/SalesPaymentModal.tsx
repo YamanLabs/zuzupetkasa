@@ -1,5 +1,5 @@
 import React from 'react';
-import { Banknote, CreditCard, Percent, X, Check } from 'lucide-react';
+import { Money as Banknote, CreditCard, Percent, X, Check } from '@phosphor-icons/react';
 
 interface SalesPaymentModalProps {
     theme: 'cream' | 'dark';

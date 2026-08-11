@@ -93,7 +93,7 @@ export function generateReceiptHTML(data: ReceiptData): string {
 
             <div style="font-size: 11px;">
                 <div>Ödeme Tipi: <b>${data.paymentMethod}</b> ${data.paymentMethod2 ? `+ ${data.paymentMethod2}` : ''}</div>
-                ${data.paidAmount ? `<div>Alınan Nakit: ${data.paidAmount.toFixed(2)} TL</div>` : ''}
+                ${data.paidAmount !== undefined && data.paidAmount !== null ? `<div>Alınan Nakit: ${data.paidAmount.toFixed(2)} TL</div>` : ''}
                 ${data.changeAmount !== undefined && data.changeAmount > 0 ? `<div style="font-weight: bold;">Para Üstü: ${data.changeAmount.toFixed(2)} TL</div>` : ''}
             </div>
 

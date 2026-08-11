@@ -1,6 +1,6 @@
 {
   "name": "nextjs-kasa-pos",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -14,6 +14,8 @@
     "dist:x64": "next build && electron-builder --win portable --x64",
     "dist:arm64": "next build && electron-builder --win portable --arm64",
     "dist:all": "next build && electron-builder --win portable --x64 --arm64",
+    "dist:unpacked": "next build && electron-builder --dir",
+    "dist:unpacked:arm64": "next build && electron-builder --dir --arm64",
     "start": "node server.js",
     "lint": "eslint"
   },
@@ -22,7 +24,6 @@
     "@phosphor-icons/react": "^2.1.10",
     "electron-serve": "^3.0.1",
     "framer-motion": "^12.42.2",
-    "lucide-react": "^1.26.0",
     "next": "16.2.11",
     "react": "19.2.4",
     "react-dom": "19.2.4",

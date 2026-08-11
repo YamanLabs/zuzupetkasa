@@ -1,10 +1,10 @@
 import React from 'react';
-import { Tag, CreditCard, Store, Key, Database } from 'lucide-react';
+import { Tag, CreditCard, Storefront as Store, Key, Database } from '@phosphor-icons/react';
 
 interface SettingsNavigationProps {
     theme: 'cream' | 'dark';
-    activeTab: 'categories' | 'pos' | 'company' | 'ai' | 'system';
-    onTabSelect: (tab: 'categories' | 'pos' | 'company' | 'ai' | 'system') => void;
+    activeTab: 'categories' | 'pos' | 'company' | 'ai' | 'system' | 'service';
+    onTabSelect: (tab: 'categories' | 'pos' | 'company' | 'ai' | 'system' | 'service') => void;
 }
 
 export default function SettingsNavigation({ theme, activeTab, onTabSelect }: SettingsNavigationProps) {
@@ -67,6 +67,15 @@ export default function SettingsNavigation({ theme, activeTab, onTabSelect }: Se
             >
                 <Database strokeWidth={2} className="h-4 w-4 text-zinc-400 dark:text-zinc-300" />
                 <span>Yedekleme & Sistem</span>
+            </button>
+
+            <button
+                type="button"
+                onClick={() => onTabSelect('service')}
+                className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs transition-all active:scale-95 whitespace-nowrap ${getTabClass('service')}`}
+            >
+                <Database strokeWidth={2} className="h-4 w-4 text-blue-500 dark:text-blue-400" />
+                <span>Servis Ayarları</span>
             </button>
         </div>
     );

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { dbIPC, printerIPC, DailySummary, EndOfDayReport } from '@/lib/ipc';
 import { generateReceiptHTML } from '@/lib/receipt-printer';
-import { BarChart3, TrendingUp, DollarSign, CreditCard, Banknote, Calendar, Printer, Award, FileSpreadsheet } from 'lucide-react';
+import { ChartBar as BarChart3, TrendUp as TrendingUp, CurrencyDollar as DollarSign, CreditCard, Money as Banknote, Calendar, Printer, Trophy as Award, FileCsv as FileSpreadsheet } from '@phosphor-icons/react';
 
 interface ReportsTabProps {
     theme?: 'cream' | 'dark';

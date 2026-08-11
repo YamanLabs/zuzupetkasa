@@ -2,17 +2,16 @@
 
 import React, { useEffect } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { Cpu, ShieldCheck, Sliders } from 'lucide-react';
+import { Cpu, ShieldCheck, SlidersHorizontal as Sliders, Gear as Settings } from '@phosphor-icons/react';
 import { soundFX } from '@/lib/sound-effects';
 
 import AIUploadGallery from './aistock/AIUploadGallery';
 import AIParsedTable from './aistock/AIParsedTable';
 import AIRulesModal from './aistock/AIRulesModal';
 import AIDoubleCheckModal from './aistock/AIDoubleCheckModal';
+import AISettingsModal from './aistock/AISettingsModal';
 
-import { useAIAnalysis } from '@/hooks/useAIAnalysis';
-import { useAIRules } from '@/hooks/useAIRules';
-import { useAIDoubleCheck } from '@/hooks/useAIDoubleCheck';
+import { useAIStockContext } from '@/providers/AIStockProvider';
 
 interface AIStockTabProps {
     scannedBarcode?: string;
@@ -22,33 +21,13 @@ interface AIStockTabProps {
 
 export default function AIStockTab({ scannedBarcode, onResetScannedBarcode, theme = 'cream' }: AIStockTabProps) {
     const isCream = theme === 'cream';
-    const rulesState = useAIRules();
-    
-    const analysisState = useAIAnalysis({
-        customRules: rulesState.customRules
-    });
-
-    const doubleCheckState = useAIDoubleCheck();
+    const { rulesState, settingsState, analysisState, doubleCheckState } = useAIStockContext();
 
     useEffect(() => {
-        analysisState.loadCategoryData();
-        rulesState.loadRules();
-        doubleCheckState.loadSettings();
-    }, []);
-
-    useEffect(() => {
-        if (scannedBarcode && analysisState.selectedItemIndex !== null) {
-            analysisState.setParsedItems(prev => prev.map((item, idx) => 
-                idx === analysisState.selectedItemIndex ? { ...item, barcode: scannedBarcode } : item
-            ));
-
-            const nextIdx = analysisState.parsedItems.findIndex((item, idx) => idx > analysisState.selectedItemIndex! && !item.barcode);
-            if (nextIdx !== -1) {
-                analysisState.setSelectedItemIndex(nextIdx);
-            } else {
-                analysisState.setSelectedItemIndex(null);
-            }
-
+        if (scannedBarcode && scannedBarcode.trim()) {
+            const code = scannedBarcode.trim();
+            soundFX.playScan();
+            analysisState.handleAssignScannedBarcode(code);
             if (onResetScannedBarcode) onResetScannedBarcode();
         }
     }, [scannedBarcode]);
@@ -56,7 +35,7 @@ export default function AIStockTab({ scannedBarcode, onResetScannedBarcode, them
     return (
         <div className="flex flex-col h-[calc(100vh-64px)] p-3 space-y-2.5 overflow-hidden">
             {/* Unified Compact Top Header Row */}
-            <div className={`p-2.5 rounded-2xl border flex flex-wrap items-center justify-between gap-2 shadow-sm ${
+            <div className={`p-2.5 rounded-2xl border flex flex-wrap items-center justify-between gap-2 shadow-sm shrink-0 ${
                 isCream ? 'bg-white border-[#d8d1c2]' : 'bg-slate-900/90 border-slate-800'
             }`}>
                 <div className="flex items-center space-x-3">
@@ -106,6 +85,16 @@ export default function AIStockTab({ scannedBarcode, onResetScannedBarcode, them
                         <Sliders strokeWidth={2} className="h-3.5 w-3.5" />
                         <span>AI Kuralları</span>
                     </button>
+
+                    <button
+                        onClick={() => { soundFX.playClick(); settingsState.setShowSettingsModal(true); }}
+                        className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl font-black text-xs shadow-sm transition active:scale-95 ${
+                            isCream ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-600 hover:bg-slate-500 text-white'
+                        }`}
+                    >
+                        <Settings strokeWidth={2} className="h-3.5 w-3.5" />
+                        <span>AI Ayarları</span>
+                    </button>
                 </div>
             </div>
 
@@ -125,6 +114,8 @@ export default function AIStockTab({ scannedBarcode, onResetScannedBarcode, them
                 onCategoryChange={analysisState.handleCategoryChange}
                 onItemFieldChange={analysisState.handleItemFieldChange}
                 onCommitStock={analysisState.handleCommitStockToDatabase}
+                onRemoveItem={analysisState.handleRemoveParsedItem}
+                onToggleMatchedStatus={analysisState.handleToggleMatchedStatus}
             />
 
             {/* Modals */}
@@ -167,6 +158,28 @@ export default function AIStockTab({ scannedBarcode, onResetScannedBarcode, them
                         onRunDoubleCheck={() => doubleCheckState.handleRunDoubleCheck(analysisState.selectedFiles)}
                         onSearchChange={doubleCheckState.setDoubleCheckSearch}
                         onFilterChange={(filter) => { soundFX.playClick(); doubleCheckState.setDoubleCheckFilter(filter); }}
+                    />
+                )}
+
+                {settingsState.showSettingsModal && (
+                    <AISettingsModal 
+                        key="settings-modal"
+                        theme={theme}
+                        show={settingsState.showSettingsModal}
+                        onClose={() => { soundFX.playClick(); settingsState.setShowSettingsModal(false); }}
+                        ensembleMode={settingsState.ensembleMode}
+                        geminiModel1={settingsState.geminiModel1}
+                        geminiModel2={settingsState.geminiModel2}
+                        geminiModel3={settingsState.geminiModel3}
+                        geminiMergerModel={settingsState.geminiMergerModel}
+                        overwriteInvoicePrices={settingsState.overwriteInvoicePrices}
+                        onEnsembleModeChange={settingsState.setEnsembleMode}
+                        onGeminiModel1Change={settingsState.setGeminiModel1}
+                        onGeminiModel2Change={settingsState.setGeminiModel2}
+                        onGeminiModel3Change={settingsState.setGeminiModel3}
+                        onGeminiMergerModelChange={settingsState.setGeminiMergerModel}
+                        onOverwriteInvoicePricesChange={settingsState.setOverwriteInvoicePrices}
+                        onSaveSettings={settingsState.handleSaveSettings}
                     />
                 )}
             </AnimatePresence>

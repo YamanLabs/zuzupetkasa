@@ -1,7 +1,8 @@
 "use client";
 
 import React from 'react';
-import { Settings, CheckCircle2, Save, X, Link2 } from 'lucide-react';
+import { Gear as Settings, CheckCircle, FloppyDisk as Save, X, Link } from '@phosphor-icons/react';
+import { posIPC } from '@/lib/ipc';
 import { generateReceiptHTML } from '@/lib/receipt-printer';
 import { soundFX } from '@/lib/sound-effects';
 
@@ -12,6 +13,8 @@ import SettingsPOS from './settings/SettingsPOS';
 import SettingsCompany from './settings/SettingsCompany';
 import SettingsAI from './settings/SettingsAI';
 import SettingsSystem from './settings/SettingsSystem';
+import SettingsBackup from './settings/SettingsBackup';
+import SettingsService from './settings/SettingsService';
 
 interface SettingsTabProps {
     theme?: 'cream' | 'dark';
@@ -72,7 +75,7 @@ export default function SettingsTab({ theme = 'cream', onThemeChange }: Settings
 
                 {s.savedNotice && (
                     <div className="bg-emerald-100 text-emerald-950 border border-emerald-300 text-xs font-black px-3 py-1.5 rounded-xl flex items-center space-x-1.5 shadow-sm animate-bounce">
-                        <CheckCircle2 strokeWidth={2} className="h-4 w-4 text-emerald-600" />
+                        <CheckCircle className="h-4 w-4 text-emerald-600" weight="bold" />
                         <span>Ayarlar Kaydedildi!</span>
                     </div>
                 )}
@@ -126,15 +129,30 @@ export default function SettingsTab({ theme = 'cream', onThemeChange }: Settings
                 )}
 
                 {s.activeTab === 'system' && (
-                    <SettingsSystem 
+                    <div className="space-y-6">
+                        <SettingsBackup 
+                            theme={theme}
+                            settings={s.settings}
+                            onSettingsChange={handleSettingsChange}
+                        />
+                        <SettingsSystem 
+                            theme={theme}
+                            settings={s.settings}
+                            soundEnabled={s.soundEnabled}
+                            onThemeSelect={s.handleThemeSelect}
+                            onToggleSound={s.toggleSound}
+                            onClearDatabase={s.handleClearDatabase}
+                            onExportBackup={s.handleExportBackup}
+                            onImportBackup={s.handleImportBackup}
+                        />
+                    </div>
+                )}
+
+                {s.activeTab === 'service' && (
+                    <SettingsService 
                         theme={theme}
-                        settings={s.settings}
-                        soundEnabled={s.soundEnabled}
-                        onThemeSelect={s.handleThemeSelect}
-                        onToggleSound={s.toggleSound}
-                        onClearDatabase={s.handleClearDatabase}
-                        onExportBackup={s.handleExportBackup}
-                        onImportBackup={s.handleImportBackup}
+                        onExportBarcodes={s.handleExportBarcodes}
+                        onImportBarcodes={s.handleImportBarcodes}
                     />
                 )}
 
@@ -229,6 +247,43 @@ export default function SettingsTab({ theme = 'cream', onThemeChange }: Settings
                                     />
                                 </div>
                             </div>
+
+                            {/* BUG-18: Pair button and status message */}
+                            {s.pairStatusMsg && (
+                                <p className={`text-[11px] font-bold px-2 py-1.5 rounded-lg ${
+                                    s.pairStatusMsg.startsWith('✓') || s.pairStatusMsg.startsWith('Bağlantı')
+                                        ? (isCream ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-900/30 text-emerald-300')
+                                        : s.pairStatusMsg.startsWith('Hata') || s.pairStatusMsg.startsWith('Ulaşılamadı')
+                                            ? (isCream ? 'bg-rose-100 text-rose-800' : 'bg-rose-900/30 text-rose-300')
+                                            : (isCream ? 'bg-blue-100 text-blue-800' : 'bg-blue-900/30 text-blue-300')
+                                }`}>
+                                    {s.pairStatusMsg}
+                                </p>
+                            )}
+
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    s.setPairStatusMsg('Eşleme deneniyor...');
+                                    try {
+                                        const res = await posIPC.pairPosTerminal({
+                                            ip: s.pairIp,
+                                            port: s.pairPort,
+                                            serialNo: s.pairSerialNo,
+                                            appNo: s.pairAppNo
+                                        });
+                                        s.setPairStatusMsg(res.success ? `✓ ${res.message}` : `Hata: ${res.message}`);
+                                    } catch (err: any) {
+                                        s.setPairStatusMsg(`Hata: ${err.message}`);
+                                    }
+                                }}
+                                className={`w-full py-2 rounded-xl font-black text-xs flex items-center justify-center space-x-1.5 transition active:scale-95 ${
+                                    isCream ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-700 hover:bg-blue-600 text-white'
+                                }`}
+                            >
+                                <Link className="h-4 w-4" weight="bold" />
+                                <span>inPOS Cihazını Eşle</span>
+                            </button>
                         </div>
                     </div>
                 </div>

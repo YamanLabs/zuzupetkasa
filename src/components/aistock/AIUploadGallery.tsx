@@ -1,5 +1,5 @@
 import React from 'react';
-import { UploadCloud, FileText, X, Sparkles } from 'lucide-react';
+import { CloudArrowUp as UploadCloud, FileText, X, Sparkle as Sparkles } from '@phosphor-icons/react';
 
 interface AIUploadGalleryProps {
     theme: 'cream' | 'dark';

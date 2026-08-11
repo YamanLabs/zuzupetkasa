@@ -15,13 +15,15 @@ export interface AIParsedItem {
     sale_price: number;
     unit: string;
     matchedProduct?: Product | null;
+    originalMatchedProduct?: Product | null;
 }
 
 interface UseAIAnalysisProps {
     customRules: AICustomRule[];
+    overwriteInvoicePrices?: boolean;
 }
 
-export function useAIAnalysis({ customRules }: UseAIAnalysisProps) {
+export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: UseAIAnalysisProps) {
     const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
     const [filePreviews, setFilePreviews] = useState<string[]>([]);
     const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
@@ -52,8 +54,11 @@ export function useAIAnalysis({ customRules }: UseAIAnalysisProps) {
     };
 
     const handleRemoveFile = (index: number) => {
+        setFilePreviews(prev => {
+            URL.revokeObjectURL(prev[index]);
+            return prev.filter((_, i) => i !== index);
+        });
         setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-        setFilePreviews(prev => prev.filter((_, i) => i !== index));
     };
 
     const convertFileToBase64 = (file: File): Promise<string> => {
@@ -76,7 +81,11 @@ export function useAIAnalysis({ customRules }: UseAIAnalysisProps) {
 
             if (result.success) {
                 setStatusMessage(result.message);
-                await loadCategoryData();
+
+                const margins = await dbIPC.getCategoryMargins();
+                setCategoryMargins(margins);
+                const localCategories = Object.keys(margins);
+                setAvailableCategories(localCategories);
 
                 const serviceFee = parseFloat((result as any).invoice_service_fee || 0);
                 const totalQty = parseInt((result as any).total_quantity || 0, 10);
@@ -108,26 +117,71 @@ export function useAIAnalysis({ customRules }: UseAIAnalysisProps) {
                         }
                     }
 
-                    if (combined.includes('yaş') || combined.includes('yas') || combined.includes('konserve') || 
-                        combined.includes('pouch') || combined.includes('çorba') || combined.includes('corba') || 
-                        combined.includes('krema') || combined.includes('ödül') || combined.includes('odul') || 
-                        combined.includes('stick') || combined.includes('sosis') || combined.includes('ezme')) {
-                        return 'Yaş Mama';
-                    }
-                    if (combined.includes('mama') || combined.includes('kuru') || combined.includes('kedi mamasi') || combined.includes('kopek mamasi')) {
-                        return 'Mama';
-                    }
-                    if (combined.includes('kum') || combined.includes('bentonit')) return 'Kedi Kumu';
-                    if (combined.includes('oyuncak') || combined.includes('tırmalama') || combined.includes('top')) return 'Oyuncak';
-                    if (combined.includes('kap') || combined.includes('suluk')) return 'Mama Kapları';
-                    if (combined.includes('tasma') || combined.includes('tarak') || combined.includes('şampuan') || combined.includes('ped')) return 'Aksesuar';
-                    if (combined.includes('çanta') || combined.includes('canta') || combined.includes('taşıma')) return 'Taşıma Çantası';
-                    if (combined.includes('yatak')) return 'Yatak';
-
-                    if (cat && availableCategories.includes(cat)) {
+                    if (cat && localCategories.includes(cat)) {
                         return cat;
                     }
-                    return cat || (availableCategories[0] || 'Mama');
+                    
+                    if (cat) {
+                        return cat;
+                    }
+
+                    return localCategories[0] || 'Genel';
+                };
+
+                const extractGrammages = (str: string): string[] => {
+                    const norm = normalizeName(str).replace(/,/g, '.');
+                    const matches = norm.match(/\b(\d+(?:\.\d+)?)\s*(kg|g|gr|gram|ml|l|lt)\b/g);
+                    if (!matches) return [];
+                    return matches.map(m => {
+                        const valMatch = m.match(/\d+(?:\.\d+)?/);
+                        const unitMatch = m.match(/[a-z]+/);
+                        if (!valMatch || !unitMatch) return m;
+                        const val = parseFloat(valMatch[0]);
+                        let unit = unitMatch[0];
+                        if (unit === 'gr' || unit === 'gram') unit = 'g';
+                        if (unit === 'lt') unit = 'l';
+                        return `${val}${unit}`;
+                    });
+                };
+
+                const extractFlavors = (str: string): string[] => {
+                    const norm = normalizeName(str);
+                    const map: Record<string, string> = {
+                        tavuk: 'tavuk', tavuklu: 'tavuk',
+                        somon: 'somon', somonlu: 'somon',
+                        kuzu: 'kuzu', kuzulu: 'kuzu',
+                        ordek: 'ordek', ordekli: 'ordek',
+                        hindi: 'hindi', hindili: 'hindi',
+                        dana: 'dana', danali: 'dana',
+                        sigir: 'sigir', sigirli: 'sigir',
+                        balik: 'balik', balikli: 'balik',
+                        hamsi: 'hamsi', hamsili: 'hamsi',
+                        karides: 'karides', karidesli: 'karides'
+                    };
+                    const found: string[] = [];
+                    const words = norm.split(/\s+/);
+                    for (const w of words) {
+                        if (map[w] && !found.includes(map[w])) found.push(map[w]);
+                    }
+                    return found;
+                };
+
+                const isValidVariantMatch = (invName: string, dbName: string): boolean => {
+                    const invGrams = extractGrammages(invName);
+                    const dbGrams = extractGrammages(dbName);
+                    if (invGrams.length > 0 && dbGrams.length > 0) {
+                        if (invGrams.sort().join(',') !== dbGrams.sort().join(',')) {
+                            return false;
+                        }
+                    }
+                    const invFlavors = extractFlavors(invName);
+                    const dbFlavors = extractFlavors(dbName);
+                    if (invFlavors.length > 0 && dbFlavors.length > 0) {
+                        if (invFlavors.sort().join(',') !== dbFlavors.sort().join(',')) {
+                            return false;
+                        }
+                    }
+                    return true;
                 };
 
                 const findExistingMatch = (itemName: string, itemBarcode: string): Product | null => {
@@ -146,9 +200,12 @@ export function useAIAnalysis({ customRules }: UseAIAnalysisProps) {
                         let best: Product | null = null;
                         let maxCnt = 0;
                         for (const p of dbProducts) {
+                            if (!isValidVariantMatch(itemName, p.name)) continue;
+
                             const normP = normalizeName(p.name);
-                            const cnt = tokens.filter(tok => normP.includes(tok)).length;
-                            if (cnt >= Math.ceil(tokens.length * 0.75) && cnt > maxCnt) {
+                            const pTokens = normP.split(' ').filter(t => t.length > 1);
+                            const cnt = tokens.filter(tok => pTokens.includes(tok)).length;
+                            if (cnt >= Math.ceil(tokens.length * 0.90) && cnt > maxCnt) {
                                 maxCnt = cnt;
                                 best = p;
                             }
@@ -169,29 +226,43 @@ export function useAIAnalysis({ customRules }: UseAIAnalysisProps) {
                     }
                     const catName = normalizeCategoryName(item.category, item.name);
 
-                    const priceExcl = parseFloat(item.unit_price_excl_tax || item.cost_price || 0) || 0;
+                    const originalPriceExcl = parseFloat(item.unit_price_excl_tax || item.cost_price || 0) || 0;
                     const vat = parseFloat(item.vat_rate !== undefined ? item.vat_rate : 20) || 20;
-                    const unitCostWithTax = parseFloat(item.unit_cost_with_tax || 0) || Math.round(priceExcl * (1 + vat / 100) * 100) / 100;
-                    const effectiveCost = parseFloat(item.effective_cost || item.cost_price || 0) || Math.round((unitCostWithTax + feePerUnit) * 100) / 100;
+                    const priceWithVat = Math.round(originalPriceExcl * (1 + vat / 100) * 100) / 100;
                     
-                    const catObj = categoryMargins[catName];
+                    let unitCostWithTax = parseFloat(item.unit_cost_with_tax || 0) || priceWithVat;
+                    let effectiveCost = parseFloat(item.effective_cost || item.cost_price || 0) || Math.round((unitCostWithTax + feePerUnit) * 100) / 100;
+                    
+                    const catObj = margins[catName];
                     const cashMargin = typeof catObj === 'object' && catObj !== null ? catObj.cash : (Number(catObj) || 30);
                     
                     let computedSalePrice = parseFloat(item.sale_price || 0);
-                    if (!computedSalePrice || isNaN(computedSalePrice)) {
-                        computedSalePrice = effectiveCost > 0 ? Math.round(effectiveCost * (1 + cashMargin / 100)) : (matched ? matched.sale_price : 0);
+
+                    if (!overwriteInvoicePrices && matched) {
+                        if (matched.cost_price > 0) {
+                            effectiveCost = matched.cost_price;
+                            unitCostWithTax = matched.cost_price;
+                        }
+                        if (matched.sale_price > 0) {
+                            computedSalePrice = matched.sale_price;
+                        } else if (!computedSalePrice || isNaN(computedSalePrice)) {
+                            computedSalePrice = effectiveCost > 0 ? Number((effectiveCost * (1 + cashMargin / 100)).toFixed(2)) : 0;
+                        }
+                    } else if (!computedSalePrice || isNaN(computedSalePrice)) {
+                        computedSalePrice = effectiveCost > 0 ? Number((effectiveCost * (1 + cashMargin / 100)).toFixed(2)) : (matched ? matched.sale_price : 0);
                     }
 
                     enrichedItems.push({
                         ...item,
-                        unit_price_excl_tax: priceExcl,
+                        unit_price_excl_tax: originalPriceExcl,
                         vat_rate: vat,
                         unit_cost_with_tax: unitCostWithTax,
                         effective_cost: effectiveCost,
                         cost_price: effectiveCost,
                         sale_price: isNaN(computedSalePrice) ? 0 : computedSalePrice,
                         category: catName,
-                        matchedProduct: matched
+                        matchedProduct: matched,
+                        originalMatchedProduct: matched
                     });
                 }
 
@@ -217,13 +288,13 @@ export function useAIAnalysis({ customRules }: UseAIAnalysisProps) {
         setServiceFeePerUnit(feePerUnit);
 
         setParsedItems(prev => prev.map(item => {
-            const priceExcl = item.unit_price_excl_tax || 0;
-            const vat = item.vat_rate !== undefined ? item.vat_rate : 20;
-            const unitCostWithTax = Math.round(priceExcl * (1 + vat / 100) * 100) / 100;
+            const exclTax = item.unit_price_excl_tax || 0;
+            const vatRate = item.vat_rate || 20;
+            const unitCostWithTax = Math.round(exclTax * (1 + vatRate / 100) * 100) / 100;
             const effectiveCost = Math.round((unitCostWithTax + feePerUnit) * 100) / 100;
             const catObj = categoryMargins[item.category];
             const cashMargin = typeof catObj === 'object' && catObj !== null ? catObj.cash : (Number(catObj) || 30);
-            const salePrice = effectiveCost > 0 ? Math.round(effectiveCost * (1 + cashMargin / 100)) : item.sale_price;
+            const salePrice = effectiveCost > 0 ? Number((effectiveCost * (1 + cashMargin / 100)).toFixed(2)) : item.sale_price;
             return {
                 ...item,
                 unit_cost_with_tax: unitCostWithTax,
@@ -241,7 +312,7 @@ export function useAIAnalysis({ customRules }: UseAIAnalysisProps) {
             const cashMargin = typeof catObj === 'object' && catObj !== null ? catObj.cash : (Number(catObj) || 30);
             const baseCost = item.effective_cost || item.unit_cost_with_tax || item.cost_price;
             const computedSalePrice = baseCost > 0 
-                ? Math.round(baseCost * (1 + cashMargin / 100)) 
+                ? Number((baseCost * (1 + cashMargin / 100)).toFixed(2)) 
                 : item.sale_price;
             return {
                 ...item,
@@ -257,19 +328,81 @@ export function useAIAnalysis({ customRules }: UseAIAnalysisProps) {
             const updated = { ...item, [field]: value };
             
             if (field === 'unit_price_excl_tax' || field === 'vat_rate' || field === 'quantity') {
-                const priceExcl = parseFloat(field === 'unit_price_excl_tax' ? value : updated.unit_price_excl_tax) || 0;
-                const vat = parseFloat(field === 'vat_rate' ? value : updated.vat_rate) || 0;
-                const unitCostWithTax = Math.round(priceExcl * (1 + vat / 100) * 100) / 100;
+                const exclTax = parseFloat(field === 'unit_price_excl_tax' ? value : updated.unit_price_excl_tax) || 0;
+                const vatRate = parseFloat((field === 'vat_rate' ? value : updated.vat_rate)?.toString() || '20') || 20;
+                const unitCostWithTax = Math.round(exclTax * (1 + vatRate / 100) * 100) / 100;
                 const effectiveCost = Math.round((unitCostWithTax + serviceFeePerUnit) * 100) / 100;
                 const catObj = categoryMargins[item.category];
                 const cashMargin = typeof catObj === 'object' && catObj !== null ? catObj.cash : (Number(catObj) || 30);
                 updated.unit_cost_with_tax = unitCostWithTax;
                 updated.effective_cost = effectiveCost;
                 updated.cost_price = effectiveCost;
-                updated.sale_price = effectiveCost > 0 ? Math.round(effectiveCost * (1 + cashMargin / 100)) : item.sale_price;
+                updated.sale_price = effectiveCost > 0 ? Number((effectiveCost * (1 + cashMargin / 100)).toFixed(2)) : item.sale_price;
             }
             return updated;
         }));
+    };
+
+    const handleToggleMatchedStatus = (index: number) => {
+        setParsedItems(prev => prev.map((item, idx) => {
+            if (idx !== index) return item;
+            if (item.matchedProduct) {
+                return {
+                    ...item,
+                    matchedProduct: null,
+                    originalMatchedProduct: item.originalMatchedProduct || item.matchedProduct
+                };
+            } else {
+                return {
+                    ...item,
+                    matchedProduct: item.originalMatchedProduct || null
+                };
+            }
+        }));
+    };
+
+    const handleRemoveParsedItem = (index: number) => {
+        setParsedItems(prev => prev.filter((_, i) => i !== index));
+        setSelectedItemIndex(prev => {
+            if (prev === null) return null;
+            if (prev === index) return null;
+            if (prev > index) return prev - 1;
+            return prev;
+        });
+    };
+
+    const handleAssignScannedBarcode = async (barcode: string) => {
+        if (parsedItems.length === 0 || !barcode || !barcode.trim()) return;
+        const cleanCode = barcode.trim();
+
+        let targetIndex = selectedItemIndex;
+        if (targetIndex === null || targetIndex < 0 || targetIndex >= parsedItems.length) {
+            targetIndex = parsedItems.findIndex(i => !i.barcode);
+            if (targetIndex === -1) targetIndex = 0;
+        }
+
+        const dbProducts = await dbIPC.getProducts('', 'Tümü');
+        const matched = dbProducts.find(p => p.barcode && p.barcode.trim() === cleanCode) || null;
+
+        setParsedItems(prev => prev.map((item, idx) => {
+            if (idx !== targetIndex) return item;
+            return {
+                ...item,
+                barcode: cleanCode,
+                matchedProduct: matched || item.matchedProduct,
+                originalMatchedProduct: matched || item.originalMatchedProduct
+            };
+        }));
+
+        const itemName = parsedItems[targetIndex]?.name || 'Ürün';
+        setStatusMessage(`Barkod [${cleanCode}] "${itemName}" kaleme atandı!`);
+
+        const nextNoBarcodeIndex = parsedItems.findIndex((item, idx) => idx > targetIndex && !item.barcode);
+        if (nextNoBarcodeIndex !== -1) {
+            setSelectedItemIndex(nextNoBarcodeIndex);
+        } else if (targetIndex < parsedItems.length - 1) {
+            setSelectedItemIndex(targetIndex + 1);
+        }
     };
 
     const handleCommitStockToDatabase = async () => {
@@ -312,12 +445,13 @@ export function useAIAnalysis({ customRules }: UseAIAnalysisProps) {
     };
 
     return {
-        selectedFiles, filePreviews, isAnalyzing, statusMessage,
+        selectedFiles, filePreviews, isAnalyzing, statusMessage, setStatusMessage,
         parsedItems, setParsedItems, selectedItemIndex, setSelectedItemIndex,
         isSaving, categoryMargins, availableCategories,
         invoiceServiceFee, totalProductQuantity, serviceFeePerUnit,
         loadCategoryData, handleFileSelect, handleRemoveFile,
         handleRunAIAnalysis, handleServiceFeeChange, handleCategoryChange,
-        handleItemFieldChange, handleCommitStockToDatabase
+        handleItemFieldChange, handleCommitStockToDatabase,
+        handleRemoveParsedItem, handleAssignScannedBarcode, handleToggleMatchedStatus
     };
 }
