@@ -1,6 +1,7 @@
 const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
+const { app } = require('electron');
 
 class PosDatabase {
     constructor() {
@@ -10,21 +11,38 @@ class PosDatabase {
 
     async init(customPath = null) {
         if (!customPath) {
-            // Check if pos_system.db exists in parent directory (workspace root) or current directory
-            const parentDb = path.join(__dirname, '..', '..', 'pos_system.db');
-            const localDb = path.join(__dirname, '..', 'pos_system.db');
-            if (fs.existsSync(parentDb)) {
-                this.dbPath = parentDb;
-            } else if (fs.existsSync(localDb)) {
-                this.dbPath = localDb;
+            const isPackaged = app && app.isPackaged;
+            if (isPackaged) {
+                // In production: use userData directory (writable, persistent)
+                const userDataPath = app.getPath('userData');
+                this.dbPath = path.join(userDataPath, 'pos_system.db');
             } else {
-                this.dbPath = parentDb;
+                // In development: use project root
+                const parentDb = path.join(__dirname, '..', '..', 'pos_system.db');
+                const localDb = path.join(__dirname, '..', 'pos_system.db');
+                if (fs.existsSync(parentDb)) {
+                    this.dbPath = parentDb;
+                } else if (fs.existsSync(localDb)) {
+                    this.dbPath = localDb;
+                } else {
+                    this.dbPath = localDb;
+                }
             }
         } else {
             this.dbPath = customPath;
         }
 
-        const SQL = await initSqlJs();
+        // Resolve WASM file path — works both inside asar and during dev
+        // In production asar builds, asarUnpack puts wasm into app.asar.unpacked/
+        let wasmPath;
+        if (app && app.isPackaged) {
+            wasmPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+        } else {
+            wasmPath = path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+        }
+        const SQL = await initSqlJs({
+            locateFile: () => wasmPath
+        });
 
         if (fs.existsSync(this.dbPath)) {
             const filebuffer = fs.readFileSync(this.dbPath);
@@ -178,15 +196,24 @@ class PosDatabase {
                 ["Bakım & Sağlık", 35.0, 40.0],
                 ["Kedi Kumu", 25.0, 30.0],
                 ["Aksesuar", 40.0, 45.0],
-                ["Genel", 30.0, 35.0]
+                ["Genel", 30.0, 35.0],
+                ["Mama Kapları", 30.0, 35.0],
+                ["Yatak", 35.0, 40.0]
             ];
             for (const [cName, cCash, cCard] of defaultCats) {
                 this.execute("INSERT OR IGNORE INTO categories (name, margin_percent, card_margin_percent) VALUES (?, ?, ?)", [cName, cCash, cCard]);
             }
         }
 
-        // Run wet food migration and stock sync
-        this.migrateWetFoodAndSyncStock();
+        // Ensure Mama Kapları and Yatak categories exist
+        this.addCategoryIfNotExist('Mama Kapları', 30.0, 35.0);
+        this.addCategoryIfNotExist('Yatak', 35.0, 40.0);
+
+        // Run wet food migration and stock sync — only once
+        const migDone = this.queryOne("SELECT value FROM settings WHERE key = 'wet_food_migration_done'");
+        if (!migDone) {
+            this.migrateWetFoodAndSyncStock();
+        }
 
         // Seed default settings
         const defaultSettings = {
@@ -195,7 +222,7 @@ class PosDatabase {
             "company_address": "Merkez Mh. Main St. No:1",
             "receipt_footer": "BIZ TERCIH ETTIGINIZ ICIN TESEKKUR EDERIZ!",
             "tax_rate": "20",
-            "gemini_api_key": "AQ.Ab8RN6KK43DqBpE1BAU8uN3Ho7sWHkkdzRrVUX2hi_jYboysRw",
+            "gemini_api_key": "",
             "currency_symbol": "TL",
             "receipt_template": "compact_minimal",
             "dark_mode": "true"
@@ -269,6 +296,9 @@ class PosDatabase {
             this.execute("UPDATE products SET category = 'Oyuncak' WHERE id IN (435)");
             this.execute("UPDATE products SET category = 'Mama' WHERE id IN (562, 555, 558, 537)");
 
+            // Mark migration as done so it never runs again
+            this.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('wet_food_migration_done', '1')");
+
             this.save();
         } catch (err) {
             console.error("Migration error in database.js:", err);
@@ -280,7 +310,6 @@ class PosDatabase {
         return String(str)
             .toLowerCase()
             .replace(/i̇/g, 'i')
-            .replace(/i/g, 'i')
             .replace(/ı/g, 'i')
             .replace(/ğ/g, 'g')
             .replace(/ü/g, 'u')
@@ -727,7 +756,7 @@ class PosDatabase {
             dateStr = new Date().toISOString().substring(0, 10);
         }
 
-        const activeFilter = "status NOT IN ('Iade Edildi', 'İade Edildi', 'Ä°ade Edildi')";
+        const activeFilter = "status NOT IN ('Iade Edildi', '\u0130ade Edildi')";
         const summary = this.queryOne(`
             SELECT
                 COUNT(*) as total_sales_count,
@@ -736,8 +765,8 @@ class PosDatabase {
                 COALESCE(SUM(discount), 0.0) as total_discounts,
                 COALESCE(SUM(CASE WHEN payment_method = 'Nakit' THEN payment_amount_1 ELSE 0 END), 0.0) +
                 COALESCE(SUM(CASE WHEN payment_method_2 = 'Nakit' THEN payment_amount_2 ELSE 0 END), 0.0) as cash_turnover,
-                COALESCE(SUM(CASE WHEN payment_method IN ('Kredi Kartı', 'Kredi Kartı', 'Kredi KartÄ±') THEN payment_amount_1 ELSE 0 END), 0.0) +
-                COALESCE(SUM(CASE WHEN payment_method_2 IN ('Kredi Kartı', 'Kredi Kartı', 'Kredi KartÄ±') THEN payment_amount_2 ELSE 0 END), 0.0) as card_turnover
+                COALESCE(SUM(CASE WHEN payment_method = 'Kredi Kart\u0131' THEN payment_amount_1 ELSE 0 END), 0.0) +
+                COALESCE(SUM(CASE WHEN payment_method_2 = 'Kredi Kart\u0131' THEN payment_amount_2 ELSE 0 END), 0.0) as card_turnover
             FROM sales
             WHERE DATE(created_at) = DATE(?) AND ${activeFilter}
         `, [dateStr]) || {};
@@ -762,7 +791,7 @@ class PosDatabase {
             dateStr = new Date().toISOString().substring(0, 10);
         }
 
-        const activeFilter = "status NOT IN ('Iade Edildi', 'İade Edildi', 'Ä°ade Edildi')";
+        const activeFilter = "status NOT IN ('Iade Edildi', '\u0130ade Edildi')";
         const summary = this.queryOne(`
             SELECT
                 COUNT(*) as total_sales_count,
@@ -770,8 +799,8 @@ class PosDatabase {
                 COALESCE(SUM(tax_amount), 0.0) as total_tax,
                 COALESCE(SUM(CASE WHEN payment_method = 'Nakit' THEN payment_amount_1 ELSE 0 END), 0.0) +
                 COALESCE(SUM(CASE WHEN payment_method_2 = 'Nakit' THEN payment_amount_2 ELSE 0 END), 0.0) as cash_total,
-                COALESCE(SUM(CASE WHEN payment_method IN ('Kredi Kartı', 'Kredi Kartı', 'Kredi KartÄ±') THEN payment_amount_1 ELSE 0 END), 0.0) +
-                COALESCE(SUM(CASE WHEN payment_method_2 IN ('Kredi Kartı', 'Kredi Kartı', 'Kredi KartÄ±') THEN payment_amount_2 ELSE 0 END), 0.0) as credit_total
+                COALESCE(SUM(CASE WHEN payment_method = 'Kredi Kart\u0131' THEN payment_amount_1 ELSE 0 END), 0.0) +
+                COALESCE(SUM(CASE WHEN payment_method_2 = 'Kredi Kart\u0131' THEN payment_amount_2 ELSE 0 END), 0.0) as credit_total
             FROM sales
             WHERE DATE(created_at) = DATE(?) AND ${activeFilter}
         `, [dateStr]) || {};
@@ -986,18 +1015,21 @@ class PosDatabase {
         this.execute("DELETE FROM products");
         this.execute("DELETE FROM categories");
 
-        // Re-seed default categories on reset
+        // Re-seed default categories on reset (including card_margin_percent)
         const defaultCats = [
-            ["Mama", 30.0],
-            ["Oyuncak", 40.0],
-            ["Taşıma Çantası", 35.0],
-            ["Bakım & Sağlık", 35.0],
-            ["Kedi Kumu", 25.0],
-            ["Aksesuar", 40.0],
-            ["Genel", 30.0]
+            ["Mama", 30.0, 35.0],
+            ["Ya\u015f Mama", 100.0, 100.0],
+            ["Oyuncak", 40.0, 45.0],
+            ["Ta\u015f\u0131ma \u00c7antas\u0131", 35.0, 40.0],
+            ["Bak\u0131m & Sa\u011fl\u0131k", 35.0, 40.0],
+            ["Kedi Kumu", 25.0, 30.0],
+            ["Aksesuar", 40.0, 45.0],
+            ["Genel", 30.0, 35.0],
+            ["Mama Kaplar\u0131", 30.0, 35.0],
+            ["Yatak", 35.0, 40.0]
         ];
-        for (const [cName, cMargin] of defaultCats) {
-            this.execute("INSERT OR IGNORE INTO categories (name, margin_percent) VALUES (?, ?)", [cName, cMargin]);
+        for (const [cName, cCash, cCard] of defaultCats) {
+            this.execute("INSERT OR IGNORE INTO categories (name, margin_percent, card_margin_percent) VALUES (?, ?, ?)", [cName, cCash, cCard]);
         }
 
         if (!keepSettings) {
@@ -1012,6 +1044,8 @@ class PosDatabase {
 
     exportBackup(targetPath) {
         try {
+            // Flush in-memory DB to disk before copying
+            this.save();
             if (this.db) {
                 try { this.db.run("PRAGMA wal_checkpoint(FULL);"); } catch (e) { }
             }
@@ -1023,20 +1057,66 @@ class PosDatabase {
         }
     }
 
-    importBackup(sourcePath) {
+    async importBackup(sourcePath) {
         try {
             if (!fs.existsSync(sourcePath)) {
                 return { success: false, error: 'Yedek dosyası bulunamadı.' };
             }
             if (this.db) {
                 try { this.db.close(); } catch (e) { }
+                this.db = null;
             }
             fs.copyFileSync(sourcePath, this.dbPath);
-            this.init();
+            await this.init();
             return { success: true };
         } catch (err) {
             console.error('Import backup error:', err);
-            try { this.init(); } catch (e) { }
+            try { await this.init(); } catch (e) { }
+            return { success: false, error: err.message };
+        }
+    }
+
+    exportBarcodes(filePath) {
+        try {
+            // Use queryAll wrapper (sql.js doesn't support better-sqlite3's .all() API)
+            const products = this.queryAll(`SELECT name, barcode FROM products WHERE barcode IS NOT NULL AND barcode != ''`);
+            const data = JSON.stringify(products, null, 2);
+            fs.writeFileSync(filePath, data, 'utf-8');
+            return { success: true };
+        } catch (err) {
+            console.error('Export barcodes error:', err);
+            return { success: false, error: err.message };
+        }
+    }
+
+    importBarcodes(sourcePath) {
+        try {
+            if (!fs.existsSync(sourcePath)) {
+                return { success: false, error: 'JSON dosyası bulunamadı.' };
+            }
+            const data = fs.readFileSync(sourcePath, 'utf-8');
+            const items = JSON.parse(data);
+            if (!Array.isArray(items)) {
+                return { success: false, error: 'Geçersiz JSON formatı.' };
+            }
+
+            // Use execute() wrapper — sql.js doesn't support better-sqlite3's .prepare().run() / .transaction() API
+            let updatedCount = 0;
+            for (const item of items) {
+                if (item.name && item.barcode) {
+                    // Check how many rows were affected by reading before & after (sql.js workaround)
+                    const before = this.queryOne('SELECT barcode FROM products WHERE name = ?', [item.name]);
+                    this.execute(`UPDATE products SET barcode = ? WHERE name = ?`, [item.barcode, item.name]);
+                    const after = this.queryOne('SELECT barcode FROM products WHERE name = ?', [item.name]);
+                    if (after && after.barcode === item.barcode) {
+                        updatedCount++;
+                    }
+                }
+            }
+
+            return { success: true, updatedCount };
+        } catch (err) {
+            console.error('Import barcodes error:', err);
             return { success: false, error: err.message };
         }
     }
