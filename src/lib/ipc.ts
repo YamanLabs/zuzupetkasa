@@ -11,6 +11,7 @@ export interface Product {
     min_stock_alert: number;
     unit: string;
     created_at?: string;
+    _stockLogReason?: string;
 }
 
 export interface CategoryMargin {
@@ -94,6 +95,8 @@ let webInMemorySettings: Record<string, string> = {
     receipt_footer: "BIZ TERCIH ETTIGINIZ ICIN TESEKKUR EDERIZ!",
     tax_rate: "20",
     gemini_api_key: "",
+    openrouter_api_key: "",
+    active_ai_provider: "gemini",
     currency_symbol: "TL",
     dark_mode: "true"
 };
@@ -580,6 +583,13 @@ export const aiIPC = {
         };
     },
 
+    onAIProgress(callback: (data: { currentBatch: number; totalBatches: number; message: string }) => void) {
+        if (isElectronAvailable()) {
+            return (window as any).electronAPI.onAIProgress(callback);
+        }
+        return () => {};
+    },
+
     async doubleCheckInvoice(base64Images: string[], apiKey?: string): Promise<{ success: boolean; message: string; report: string; summary: any; items: any[] }> {
         if (isElectronAvailable()) {
             return await (window as any).electronAPI.doubleCheckInvoice(base64Images, apiKey);
@@ -622,12 +632,25 @@ export const posIPC = {
 
 export const appControl = {
     minimize() {
-        if (isElectronAvailable()) (window as any).electronAPI.minimizeWindow();
+        if (isElectronAvailable()) {
+            (window as any).electronAPI.minimizeWindow();
+        }
     },
     maximize() {
-        if (isElectronAvailable()) (window as any).electronAPI.maximizeWindow();
+        if (isElectronAvailable()) {
+            (window as any).electronAPI.maximizeWindow();
+        }
     },
     close() {
-        if (isElectronAvailable()) (window as any).electronAPI.closeWindow();
+        if (isElectronAvailable()) {
+            (window as any).electronAPI.closeWindow();
+        }
+    },
+    setBadgeCount(count: number) {
+        if (isElectronAvailable()) {
+            if ((window as any).electronAPI.setBadgeCount) {
+                (window as any).electronAPI.setBadgeCount(count);
+            }
+        }
     }
 };

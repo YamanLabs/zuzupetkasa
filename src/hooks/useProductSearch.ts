@@ -7,10 +7,19 @@ export function useProductSearch(onProductSelected: (product: Product) => void) 
     const [categories, setCategories] = useState<string[]>([]);
     const [selectedCategory, setSelectedCategory] = useState<string>('Tümü');
     const [searchQuery, setSearchQuery] = useState<string>('');
+    const [debouncedQuery, setDebouncedQuery] = useState<string>('');
     const [selectedIndex, setSelectedIndex] = useState<number>(0);
     
     const searchInputRef = useRef<HTMLInputElement>(null);
     const selectedRowRef = useRef<HTMLTableRowElement>(null);
+
+    // IMP-25: Arama Debounce
+    useEffect(() => {
+        const handler = setTimeout(() => {
+            setDebouncedQuery(searchQuery);
+        }, 150); // 150ms gecikme
+        return () => clearTimeout(handler);
+    }, [searchQuery]);
 
     useEffect(() => {
         if (products.length > 0) {
@@ -32,13 +41,18 @@ export function useProductSearch(onProductSelected: (product: Product) => void) 
         ]);
         setCategories(cats);
 
-        if (searchQuery.trim() === '' && selectedCategory === 'Tümü') {
+        if (debouncedQuery.trim() === '' && selectedCategory === 'Tümü') {
             setProducts([]);
         } else {
-            const prods = await dbIPC.getProducts(searchQuery, selectedCategory);
+            const prods = await dbIPC.getProducts(debouncedQuery, selectedCategory);
             setProducts(prods);
         }
     };
+
+    // Reload data when debounced query or category changes
+    useEffect(() => {
+        loadData();
+    }, [debouncedQuery, selectedCategory]);
 
     const handleBarcodeScanned = async (code: string) => {
         const cleanCode = code.trim();

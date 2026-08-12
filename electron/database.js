@@ -1,7 +1,7 @@
 const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
+const { app, safeStorage } = require('electron');
 
 class PosDatabase {
     constructor() {
@@ -142,19 +142,24 @@ class PosDatabase {
                 vat_rate REAL DEFAULT 20.0,
                 tax_amount REAL DEFAULT 0.0,
                 FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE,
-                FOREIGN KEY (product_id) REFERENCES products (id)
+                FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS stock_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                product_id INTEGER NOT NULL,
-                product_name TEXT NOT NULL,
+                product_id INTEGER,
+                product_name TEXT,
                 change_quantity INTEGER NOT NULL,
                 new_stock INTEGER NOT NULL,
-                reason TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+                reason TEXT,
+                created_at DATETIME DEFAULT (datetime('now', 'localtime'))
             );
+            
+            -- BUG-09 FIX: Create indexes for frequently queried columns to improve performance
+            CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
+            CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
+            CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
+            CREATE INDEX IF NOT EXISTS idx_stock_logs_product_id ON stock_logs(product_id);
 
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -213,6 +218,22 @@ class PosDatabase {
         const migDone = this.queryOne("SELECT value FROM settings WHERE key = 'wet_food_migration_done'");
         if (!migDone) {
             this.migrateWetFoodAndSyncStock();
+        }
+
+        // BUG-03 FIX: One-time migration to fix broken Türkçe encoding in old sales records
+        // Old records may have 'Ä°ade Edildi' (mojibake) or 'Iade Edildi' (ASCII fallback)
+        const refundEncodingFixed = this.queryOne("SELECT value FROM settings WHERE key = 'refund_encoding_migration_done'");
+        if (!refundEncodingFixed) {
+            try {
+                // Fix mojibake variant
+                this.db.run("UPDATE sales SET status = '\u0130ade Edildi' WHERE status = '\u00c4\u00b0ade Edildi'");
+                // Fix ASCII fallback variant
+                this.db.run("UPDATE sales SET status = '\u0130ade Edildi' WHERE status = 'Iade Edildi'");
+                this.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('refund_encoding_migration_done', '1')");
+                console.log('[Migration] BUG-03: Refund status encoding fixed.');
+            } catch (err) {
+                console.error('[Migration] BUG-03 refund encoding fix error:', err);
+            }
         }
 
         // Seed default settings
@@ -307,8 +328,13 @@ class PosDatabase {
 
     normalizeSearchText(str) {
         if (!str) return '';
+        // BUG-18 FIX: Normalize unicode combining characters before lowercasing
+        // 'İ'.normalize('NFD') -> 'I' + combining dot, then toLowerCase -> 'i' + combining dot
+        // We handle this by normalizing NFC first, then doing explicit Turkish replacements
         return String(str)
+            .normalize('NFC')
             .toLowerCase()
+            .replace(/i\u0307/g, 'i')  // i + combining dot above (from İ)
             .replace(/i̇/g, 'i')
             .replace(/ı/g, 'i')
             .replace(/ğ/g, 'g')
@@ -465,10 +491,12 @@ class PosDatabase {
         const newStock = data.stock_quantity || 0;
         if (oldStock !== newStock) {
             const diff = newStock - oldStock;
+            // BUG-14 FIX: Allow callers to provide a custom reason via _stockLogReason
+            const logReason = data._stockLogReason || "Manuel Stok Düzenleme";
             this.execute(
                 `INSERT INTO stock_logs (product_id, product_name, change_quantity, new_stock, reason)
                  VALUES (?, ?, ?, ?, ?)`,
-                [id, data.name, diff, newStock, "Manuel Stok Düzenleme"]
+                [id, data.name, diff, newStock, logReason]
             );
         }
 
@@ -608,15 +636,18 @@ class PosDatabase {
         let total_amount = 0;
         let calculated_tax = 0;
 
-        for (const item of cart_items) {
-            const qty = parseFloat(item.quantity);
-            const price = parseFloat(item.unit_price);
-            const itemTotal = qty * price;
-            total_amount += itemTotal;
-            const vatRate = parseFloat(item.vat_rate || 20.0);
-            const itemTax = item.tax_amount !== undefined ? parseFloat(item.tax_amount) : itemTotal - (itemTotal / (1.0 + (vatRate / 100.0)));
-            calculated_tax += itemTax;
-        }
+        // BUG-08 FIX: Use transaction to ensure data integrity during sale creation
+        this.execute('BEGIN TRANSACTION');
+        try {
+            for (const item of cart_items) {
+                const qty = parseFloat(item.quantity);
+                const price = parseFloat(item.unit_price);
+                const itemTotal = qty * price;
+                total_amount += itemTotal;
+                const vatRate = parseFloat(item.vat_rate || 20.0);
+                const itemTax = item.tax_amount !== undefined ? parseFloat(item.tax_amount) : itemTotal - (itemTotal / (1.0 + (vatRate / 100.0)));
+                calculated_tax += itemTax;
+            }
 
         const final_amount = Math.max(0.0, total_amount - parseFloat(discount));
         const tax_amount = providedTax !== undefined ? parseFloat(providedTax) : calculated_tax;
@@ -653,33 +684,42 @@ class PosDatabase {
             );
 
             // Update product stock
+            // BUG-06 FIX: Use Math.floor instead of Math.round to avoid over-deducting stock
+            // BUG-05 FIX: Ensure qty is integer for stock_logs (INTEGER column)
             const prod = this.getProductById(pid);
             if (prod) {
-                const newStock = prod.stock_quantity - Math.round(qty);
+                const deductQty = Math.floor(parseFloat(qty));
+                const newStock = prod.stock_quantity - deductQty;
                 this.execute("UPDATE products SET stock_quantity = ? WHERE id = ?", [newStock, pid]);
                 this.execute(
                     `INSERT INTO stock_logs (product_id, product_name, change_quantity, new_stock, reason)
                      VALUES (?, ?, ?, ?, ?)`,
-                    [pid, item.product_name, -Math.round(qty), newStock, `Satış (${receipt_no})`]
+                    [pid, item.product_name, -deductQty, newStock, `Satış (${receipt_no})`]
                 );
             }
-        }
+            }
 
-        const dateNow = new Date().toISOString().replace('T', ' ').substring(0, 19);
-        return {
-            sale_id: saleId,
-            receipt_no,
-            total_amount,
-            discount,
-            final_amount,
-            tax_amount,
-            payment_method,
-            payment_amount_1: pay1,
-            payment_method_2,
-            payment_amount_2,
-            pos_auth_code,
-            created_at: dateNow
-        };
+            this.execute('COMMIT');
+
+            const dateNow = new Date().toISOString().replace('T', ' ').substring(0, 19);
+            return {
+                sale_id: saleId,
+                receipt_no,
+                total_amount,
+                discount,
+                final_amount,
+                tax_amount,
+                payment_method,
+                payment_amount_1: pay1,
+                payment_method_2,
+                payment_amount_2,
+                pos_auth_code,
+                created_at: dateNow
+            };
+        } catch (err) {
+            this.execute('ROLLBACK');
+            throw err;
+        }
     }
 
     getSalesList(dateStart = '', dateEnd = '') {
@@ -703,7 +743,9 @@ class PosDatabase {
 
     processRefund(saleId) {
         const sale = this.queryOne("SELECT * FROM sales WHERE id = ?", [saleId]);
-        if (!sale || sale.status === 'İade Edildi' || sale.status === 'Iade Edildi') {
+        // BUG-03 FIX: Use consistent refund status check covering all encoding variants
+        const isRefunded = sale && (sale.status === 'İade Edildi' || sale.status === 'Iade Edildi' || sale.status === 'Ä°ade Edildi');
+        if (!sale || isRefunded) {
             return false;
         }
 
@@ -723,7 +765,8 @@ class PosDatabase {
             }
         }
 
-        this.execute("UPDATE sales SET status = 'İade Edildi' WHERE id = ?", [saleId]);
+        // BUG-03 FIX: Always write the canonical refund status string
+        this.execute("UPDATE sales SET status = ? WHERE id = ?", ['İade Edildi', saleId]);
         return true;
     }
 
@@ -735,6 +778,29 @@ class PosDatabase {
 
     deleteSales(saleIds) {
         if (!Array.isArray(saleIds) || saleIds.length === 0) return true;
+        // BUG-20 FIX: Restore stock before deleting non-refunded sales
+        for (const saleId of saleIds) {
+            const sale = this.queryOne("SELECT * FROM sales WHERE id = ?", [saleId]);
+            if (!sale) continue;
+            const isRefunded = (sale.status === 'İade Edildi' || sale.status === 'Iade Edildi' || sale.status === 'Ä°ade Edildi');
+            if (!isRefunded) {
+                // Restore stock for items in this non-refunded sale
+                const items = this.getSaleItems(saleId);
+                for (const item of items) {
+                    const prod = this.getProductById(item.product_id);
+                    if (prod) {
+                        const restoreQty = Math.floor(parseFloat(item.quantity));
+                        const newStock = prod.stock_quantity + restoreQty;
+                        this.execute("UPDATE products SET stock_quantity = ? WHERE id = ?", [newStock, item.product_id]);
+                        this.execute(
+                            `INSERT INTO stock_logs (product_id, product_name, change_quantity, new_stock, reason)
+                             VALUES (?, ?, ?, ?, ?)`,
+                            [item.product_id, item.product_name, restoreQty, newStock, `Kayıt Silme (${sale.receipt_no})`]
+                        );
+                    }
+                }
+            }
+        }
         const placeholders = saleIds.map(() => '?').join(',');
         this.execute(`DELETE FROM sale_items WHERE sale_id IN (${placeholders})`, saleIds);
         this.execute(`DELETE FROM sales WHERE id IN (${placeholders})`, saleIds);
@@ -756,7 +822,8 @@ class PosDatabase {
             dateStr = new Date().toISOString().substring(0, 10);
         }
 
-        const activeFilter = "status NOT IN ('Iade Edildi', '\u0130ade Edildi')";
+        // BUG-03 FIX: Use all encoding variants to ensure refunded sales are excluded
+        const activeFilter = "status NOT IN ('İade Edildi', 'Iade Edildi', 'Ä°ade Edildi')";
         const summary = this.queryOne(`
             SELECT
                 COUNT(*) as total_sales_count,
@@ -791,7 +858,8 @@ class PosDatabase {
             dateStr = new Date().toISOString().substring(0, 10);
         }
 
-        const activeFilter = "status NOT IN ('Iade Edildi', '\u0130ade Edildi')";
+        // BUG-03 FIX: Use all encoding variants to ensure refunded sales are excluded
+        const activeFilter = "status NOT IN ('İade Edildi', 'Iade Edildi', 'Ä°ade Edildi')";
         const summary = this.queryOne(`
             SELECT
                 COUNT(*) as total_sales_count,
@@ -879,6 +947,32 @@ class PosDatabase {
             }
         }
         return true;
+    }
+
+    // BUG-11 FIX: Externalize category mapping rules to avoid hardcoded mappings
+    getCategoryMappingRules() {
+        let rulesStr = this.getSetting('ai_custom_rules', '');
+        let rules = [];
+        if (rulesStr) {
+            try {
+                rules = JSON.parse(rulesStr);
+            } catch (e) {}
+        }
+        // Default built-in rules if none defined in settings
+        if (rules.length === 0) {
+            rules = [
+                { keyword: 'kedi kumu', category: 'Kedi Kumu' },
+                { keyword: 'kum', category: 'Kedi Kumu' },
+                { keyword: 'köpek maması', category: 'Mama' },
+                { keyword: 'kedi maması', category: 'Mama' },
+                { keyword: 'tasma', category: 'Aksesuar' },
+                { keyword: 'oyuncak', category: 'Oyuncak' },
+                { keyword: 'şampuan', category: 'Bakım & Sağlık' },
+                { keyword: 'damla', category: 'Bakım & Sağlık' },
+                { keyword: 'vitamin', category: 'Bakım & Sağlık' }
+            ];
+        }
+        return rules;
     }
 
     addOrUpdateStockByBarcode(barcode, name, addedStock, price = 0.0, costPrice = 0.0, unit = 'Adet', category = 'Genel') {
@@ -990,11 +1084,31 @@ class PosDatabase {
     // --- SETTINGS ---
     getSetting(key, defaultValue = '') {
         const row = this.queryOne("SELECT value FROM settings WHERE key = ?", [key]);
-        return row && row.value !== null ? row.value : defaultValue;
+        if (row && row.value !== null) {
+            if (key === 'gemini_api_key' && safeStorage.isEncryptionAvailable()) {
+                try {
+                    const enc = Buffer.from(row.value, 'base64');
+                    return safeStorage.decryptString(enc);
+                } catch (e) {
+                    console.error("Failed to decrypt API key:", e);
+                    return row.value; // Fallback to plaintext if decryption fails (e.g., legacy data)
+                }
+            }
+            return row.value;
+        }
+        return defaultValue;
     }
 
     setSetting(key, value) {
-        this.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", [key, String(value)]);
+        let storeValue = String(value);
+        if (key === 'gemini_api_key' && safeStorage.isEncryptionAvailable()) {
+            try {
+                storeValue = safeStorage.encryptString(storeValue).toString('base64');
+            } catch (e) {
+                console.error("Failed to encrypt API key:", e);
+            }
+        }
+        this.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", [key, storeValue]);
         return true;
     }
 
@@ -1002,7 +1116,16 @@ class PosDatabase {
         const rows = this.queryAll("SELECT key, value FROM settings");
         const settings = {};
         for (const r of rows) {
-            settings[r.key] = r.value;
+            if (r.key === 'gemini_api_key' && safeStorage.isEncryptionAvailable()) {
+                try {
+                    const enc = Buffer.from(r.value, 'base64');
+                    settings[r.key] = safeStorage.decryptString(enc);
+                } catch (e) {
+                    settings[r.key] = r.value;
+                }
+            } else {
+                settings[r.key] = r.value;
+            }
         }
         return settings;
     }
@@ -1104,11 +1227,11 @@ class PosDatabase {
             let updatedCount = 0;
             for (const item of items) {
                 if (item.name && item.barcode) {
-                    // Check how many rows were affected by reading before & after (sql.js workaround)
-                    const before = this.queryOne('SELECT barcode FROM products WHERE name = ?', [item.name]);
-                    this.execute(`UPDATE products SET barcode = ? WHERE name = ?`, [item.barcode, item.name]);
-                    const after = this.queryOne('SELECT barcode FROM products WHERE name = ?', [item.name]);
-                    if (after && after.barcode === item.barcode) {
+                    // BUG-04 FIX: Use LIMIT 1 to avoid updating multiple products with same name
+                    // and triggering UNIQUE constraint violations on barcode column
+                    const existing = this.queryOne('SELECT id, barcode FROM products WHERE name = ? LIMIT 1', [item.name]);
+                    if (existing) {
+                        this.execute(`UPDATE products SET barcode = ? WHERE id = ?`, [item.barcode, existing.id]);
                         updatedCount++;
                     }
                 }

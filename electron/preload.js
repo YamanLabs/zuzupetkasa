@@ -52,11 +52,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // AI Invoice Scanner API
     analyzeInvoiceImages: (imageDataArray, apiKey) => ipcRenderer.invoke('ai:analyzeInvoiceImages', imageDataArray, apiKey),
     doubleCheckInvoice: (imageDataArray, apiKey) => ipcRenderer.invoke('ai:doubleCheckInvoice', imageDataArray, apiKey),
+    onAIProgress: (callback) => {
+        ipcRenderer.on('ai:progress', (event, data) => callback(data));
+        return () => ipcRenderer.removeAllListeners('ai:progress');
+    },
 
     // App Control
     minimizeWindow: () => ipcRenderer.send('app:minimize'),
     maximizeWindow: () => ipcRenderer.send('app:maximize'),
     closeWindow: () => ipcRenderer.send('app:close'),
+    setBadgeCount: (count) => ipcRenderer.send('app:setBadgeCount', count),
 
     // Auto Updater API
     updater: {

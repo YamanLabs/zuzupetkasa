@@ -19,12 +19,18 @@ interface AIParsedTableProps {
     onCommitStock: () => void;
     onRemoveItem: (index: number) => void;
     onToggleMatchedStatus: (index: number) => void;
+    selectedIndices: Set<number>;
+    onSelectAll: (selectAll: boolean) => void;
+    onToggleSelectIndex: (index: number) => void;
+    onBulkCategoryChange: (newCat: string) => void;
+    onBulkRemove: () => void;
 }
 
 export default function AIParsedTable({
     theme, parsedItems, selectedItemIndex, isSaving, availableCategories, categoryMargins,
     invoiceServiceFee, totalProductQuantity, serviceFeePerUnit,
-    onSelectItem, onServiceFeeChange, onCategoryChange, onItemFieldChange, onCommitStock, onRemoveItem, onToggleMatchedStatus
+    onSelectItem, onServiceFeeChange, onCategoryChange, onItemFieldChange, onCommitStock, onRemoveItem, onToggleMatchedStatus,
+    selectedIndices, onSelectAll, onToggleSelectIndex, onBulkCategoryChange, onBulkRemove
 }: AIParsedTableProps) {
     const isCream = theme === 'cream';
 
@@ -69,6 +75,42 @@ export default function AIParsedTable({
                             </span>
                         </div>
 
+                        {/* Bulk Actions */}
+                        {selectedIndices.size > 0 && (
+                            <div className={`px-2 py-1 rounded-xl border flex items-center space-x-2 ${
+                                isCream ? 'bg-purple-50 border-purple-200' : 'bg-purple-950/30 border-purple-800/50'
+                            }`}>
+                                <span className={`text-[11px] font-bold ${isCream ? 'text-purple-700' : 'text-purple-300'}`}>
+                                    {selectedIndices.size} Seçili
+                                </span>
+                                <div className="flex items-center space-x-1 border-l pl-2 ml-2 border-purple-300 dark:border-purple-800/50">
+                                    <select
+                                        value=""
+                                        onChange={(e) => {
+                                            if (e.target.value) onBulkCategoryChange(e.target.value);
+                                        }}
+                                        className={`text-xs px-1.5 py-0.5 rounded border outline-none font-bold ${
+                                            isCream ? 'bg-white border-purple-200 text-purple-900' : 'bg-slate-900 border-purple-800/50 text-purple-100'
+                                        }`}
+                                    >
+                                        <option value="" disabled>Kategori Değiştir</option>
+                                        {availableCategories.map(cat => (
+                                            <option key={cat} value={cat}>{cat}</option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={onBulkRemove}
+                                        className={`p-1 rounded-md transition-colors ${
+                                            isCream ? 'hover:bg-rose-100 text-rose-600' : 'hover:bg-rose-950/50 text-rose-400'
+                                        }`}
+                                        title="Seçilenleri Sil"
+                                    >
+                                        <X weight="bold" className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Commit Stock Action Button */}
                         <button
                             onClick={onCommitStock}
@@ -95,11 +137,19 @@ export default function AIParsedTable({
                             : 'bg-slate-950 border-slate-800 text-slate-400'
                     }`}>
                         <tr>
+                            <th className="py-2 px-2.5 w-8 text-center whitespace-nowrap">
+                                <input 
+                                    type="checkbox" 
+                                    className="cursor-pointer"
+                                    checked={parsedItems.length > 0 && selectedIndices.size === parsedItems.length}
+                                    onChange={(e) => onSelectAll(e.target.checked)}
+                                />
+                            </th>
                             <th className="py-2 px-2.5 w-32 whitespace-nowrap">Barkod</th>
                             <th className="py-2 px-2.5 min-w-[200px]">Ürün Adı</th>
                             <th className="py-2 px-2.5 w-32 whitespace-nowrap">Kategori</th>
                             <th className="py-2 px-2.5 w-20 text-center whitespace-nowrap">Miktar</th>
-                            <th className="py-2 px-2.5 w-24 text-right whitespace-nowrap">Birim Fiyat</th>
+                            <th className="py-2 px-2.5 w-24 text-right whitespace-nowrap">KDV Hariç Fiyat</th>
                             <th className="py-2 px-2.5 w-16 text-center whitespace-nowrap">KDV %</th>
                             <th className="py-2 px-2.5 w-24 text-right whitespace-nowrap text-amber-700 dark:text-amber-400">Efektif Alış</th>
                             <th className="py-2 px-2.5 w-16 text-center whitespace-nowrap">Kar %</th>
@@ -133,6 +183,16 @@ export default function AIParsedTable({
                                                 : 'hover:bg-slate-800/70 text-slate-100'
                                     }`}
                                 >
+                                    {/* SEÇİM KUTUSU */}
+                                    <td className="py-1.5 px-2.5 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                        <input 
+                                            type="checkbox" 
+                                            className="cursor-pointer"
+                                            checked={selectedIndices.has(idx)}
+                                            onChange={() => onToggleSelectIndex(idx)}
+                                        />
+                                    </td>
+
                                     {/* BARKOD - Düzenlenebilir Input */}
                                     <td className="py-1.5 px-2.5 font-mono text-[11px] whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                                         <div className="flex items-center space-x-1">

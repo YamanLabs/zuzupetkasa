@@ -40,6 +40,15 @@ export function useCart() {
         }));
     };
 
+    const setQuantity = (productId: number, qty: number) => {
+        setCart(prev => prev.map(item => {
+            if (item.product.id === productId) {
+                return qty > 0 ? { ...item, quantity: qty } : item;
+            }
+            return item;
+        }));
+    };
+
     const removeFromCart = (productId: number) => {
         soundFX.playClick();
         setCart(prev => prev.filter(item => item.product.id !== productId));
@@ -70,7 +79,7 @@ export function useCart() {
         cart, setCart,
         discount, setDiscount,
         discountType, setDiscountType,
-        addToCart, updateQuantity, removeFromCart, clearCart,
+        addToCart, updateQuantity, setQuantity, removeFromCart, clearCart,
         cashSubtotal, cardSubtotal,
         cashFinalTotal, cardFinalTotal, taxTotal
     };

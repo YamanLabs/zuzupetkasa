@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { aiIPC, dbIPC } from '@/lib/ipc';
 import { soundFX } from '@/lib/sound-effects';
+import { useModal } from '@/providers/ModalProvider';
 
 export function useAIDoubleCheck() {
+    const { showAlert } = useModal();
     const [showDoubleCheckModal, setShowDoubleCheckModal] = useState<boolean>(false);
     const [geminiModelName, setGeminiModelName] = useState<string>('gemini-2.5-flash');
     const [isCheckingDoubleCheck, setIsCheckingDoubleCheck] = useState<boolean>(false);
@@ -23,7 +25,7 @@ export function useAIDoubleCheck() {
         if (!geminiModelName.trim()) return;
         soundFX.playSuccess();
         await dbIPC.setSetting('gemini_model_name', geminiModelName.trim());
-        alert(`Gemini Model Adı "${geminiModelName.trim()}" olarak başarıyla kaydedildi.`);
+        showAlert(`Gemini Model Adı "${geminiModelName.trim()}" olarak başarıyla kaydedildi.`);
     };
 
     const convertFileToBase64 = (file: File): Promise<string> => {
@@ -37,7 +39,7 @@ export function useAIDoubleCheck() {
 
     const handleRunDoubleCheck = async (selectedFiles: File[]) => {
         if (selectedFiles.length === 0) {
-            alert('Lütfen öncelikle sol taraftan en az 1 adet fatura/fiş görseli veya PDF dosyası seçin.');
+            showAlert('Lütfen öncelikle sol taraftan en az 1 adet fatura/fiş görseli veya PDF dosyası seçin.');
             return;
         }
         soundFX.playClick();
@@ -51,10 +53,10 @@ export function useAIDoubleCheck() {
                 setDoubleCheckSummary(result.summary);
                 setDoubleCheckItems(result.items || []);
             } else {
-                alert('Double-Check Hatası: ' + result.message);
+                showAlert('Double-Check Hatası: ' + result.message);
             }
         } catch (err: any) {
-            alert('Çapraz kontrol hatası: ' + err.message);
+            showAlert('Çapraz kontrol hatası: ' + err.message);
         } finally {
             setIsCheckingDoubleCheck(false);
         }

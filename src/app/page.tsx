@@ -27,6 +27,7 @@ export default function POSPage() {
     const [activeTab, setActiveTab] = useState<TabType>('sales');
     const [scannedBarcode, setScannedBarcode] = useState<string>('');
     const [theme, setTheme] = useState<'cream' | 'dark'>('cream');
+    const [criticalCount, setCriticalCount] = useState<number>(0);
     
     const [updateInfo, setUpdateInfo] = useState<any>(null);
     const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -73,6 +74,19 @@ export default function POSPage() {
             }, 120); // 120ms threshold for USB converter compatibility
         }
 
+        // Poll critical stock
+        const checkCriticalStock = async () => {
+            try {
+                const crits = await dbIPC.getCriticalStockProducts();
+                setCriticalCount(crits.length);
+                appControl.setBadgeCount(crits.length);
+            } catch (e) {
+                // Ignore error
+            }
+        };
+        checkCriticalStock();
+        const stockInterval = setInterval(checkCriticalStock, 60000); // Check every minute
+
         const handleKeyDown = (e: KeyboardEvent) => {
             // Function Key Shortcuts
             if (e.key === 'F1') { e.preventDefault(); handleTabChange('sales'); return; }
@@ -91,6 +105,7 @@ export default function POSPage() {
         return () => {
             window.removeEventListener('keydown', handleKeyDown, { capture: true });
             window.removeEventListener('open-update-modal', handleUpdateEvent);
+            clearInterval(stockInterval);
         };
     }, [handleTabChange]);
 
@@ -164,7 +179,12 @@ export default function POSPage() {
                                         />
                                     )}
                                     <span className="relative z-10 flex items-center space-x-2">
-                                        <Icon className="h-4 w-4" weight="bold" />
+                                        <div className="relative">
+                                            <Icon className="h-4 w-4" weight="bold" />
+                                            {item.id === 'alerts' && criticalCount > 0 && (
+                                                <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-[#f8f6f0] dark:border-black" />
+                                            )}
+                                        </div>
                                         <span>{item.label}</span>
                                         <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded transition-colors ${
                                             isActive

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Database, CloudArrowUp as HardDriveUpload, ArrowsClockwise as RefreshCw, Clock, ShieldCheck } from '@phosphor-icons/react';
 import { dbIPC } from '@/lib/ipc';
 import { soundFX } from '@/lib/sound-effects';
+import { useModal } from '@/providers/ModalProvider';
 
 interface SettingsBackupProps {
     theme: 'cream' | 'dark';
@@ -12,6 +13,7 @@ interface SettingsBackupProps {
 }
 
 export default function SettingsBackup({ theme, settings, onSettingsChange }: SettingsBackupProps) {
+    const { showAlert, showConfirm } = useModal();
     const isCream = theme === 'cream';
     const [backups, setBackups] = useState<Array<{ filename: string; filePath: string; sizeBytes: number; mtime: Date }>>([]);
     const [isBackingUp, setIsBackingUp] = useState<boolean>(false);
@@ -49,7 +51,7 @@ export default function SettingsBackup({ theme, settings, onSettingsChange }: Se
     };
 
     const handleRestoreFile = async (filePath: string, filename: string) => {
-        if (!confirm(`${filename} tarihli yedeği geri yüklemek istediğinize emin misiniz? Mevcut verilerin üzerine yazılacaktır!`)) {
+        if (!(await showConfirm(`${filename} tarihli yedeği geri yüklemek istediğinize emin misiniz? Mevcut verilerin üzerine yazılacaktır!`))) {
             return;
         }
 
@@ -59,13 +61,13 @@ export default function SettingsBackup({ theme, settings, onSettingsChange }: Se
             const res = await dbIPC.restoreBackupFile(filePath);
             if (res.success) {
                 soundFX.playSuccess();
-                alert('Veritabanı başarıyla eski yedeğe döndürüldü!');
+                showAlert('Veritabanı başarıyla eski yedeğe döndürüldü!');
                 window.location.reload();
             } else {
-                alert('Geri yükleme hatası: ' + (res.error || 'Bilinmeyen hata'));
+                showAlert('Geri yükleme hatası: ' + (res.error || 'Bilinmeyen hata'));
             }
         } catch (e: any) {
-            alert('Hata: ' + e.message);
+            showAlert('Hata: ' + e.message);
         } finally {
             setIsRestoring(null);
         }

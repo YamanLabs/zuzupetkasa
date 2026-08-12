@@ -1,5 +1,6 @@
 import React from 'react';
 import { DownloadSimple as Download, UploadSimple as Upload, ShieldWarning as ShieldAlert, Eye } from '@phosphor-icons/react';
+import { useModal } from '@/providers/ModalProvider';
 
 interface SettingsServiceProps {
     theme: 'cream' | 'dark';
@@ -8,6 +9,7 @@ interface SettingsServiceProps {
 }
 
 export default function SettingsService({ theme, onExportBarcodes, onImportBarcodes }: SettingsServiceProps) {
+    const { showAlert } = useModal();
     const isCream = theme === 'cream';
 
     return (
@@ -57,7 +59,7 @@ export default function SettingsService({ theme, onExportBarcodes, onImportBarco
                                     // @ts-ignore
                                     window.electronAPI.updater.check().then((res: any) => {
                                         if (!res.hasUpdate) {
-                                            alert(res.error ? `Hata: ${res.error}` : 'Zaten en güncel sürümü kullanıyorsunuz.');
+                                            showAlert(res.error ? `Hata: ${res.error}` : 'Zaten en güncel sürümü kullanıyorsunuz.');
                                         } else {
                                             window.dispatchEvent(new CustomEvent('open-update-modal', { detail: res }));
                                         }

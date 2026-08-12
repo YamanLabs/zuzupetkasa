@@ -45,17 +45,36 @@ export default function SalesTab({ scannedBarcode, onResetScannedBarcode, theme 
         }
     }, [isActive]);
 
-    // Added to prevent infinite loop or stale closures if there are missing dependencies
-    useEffect(() => {
-        searchState.loadData();
-    }, [searchState.selectedCategory, searchState.searchQuery]);
-
     useEffect(() => {
         if (scannedBarcode && isActive) {
             searchState.handleBarcodeScanned(scannedBarcode);
             if (onResetScannedBarcode) onResetScannedBarcode();
         }
     }, [scannedBarcode, isActive]);
+
+    // IMP-18: Auto-Focus Search Input on any non-input key press
+    useEffect(() => {
+        if (!isActive || checkoutState.showPaymentModal) return;
+
+        const handleGlobalKeyDown = (e: KeyboardEvent) => {
+            // Ignore if we're already typing in an input or textarea
+            const target = e.target as HTMLElement;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+            // Ignore modifier keys and Function keys
+            if (e.ctrlKey || e.altKey || e.metaKey || e.key.startsWith('F')) return;
+
+            // Ignore space or enter or escape etc if we aren't typing
+            if (e.key.length !== 1 && e.key !== 'Backspace') return;
+
+            if (searchState.searchInputRef.current) {
+                searchState.searchInputRef.current.focus();
+            }
+        };
+
+        window.addEventListener('keydown', handleGlobalKeyDown);
+        return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    }, [isActive, checkoutState.showPaymentModal]);
 
     return (
         <div className="flex h-[calc(100vh-64px)] overflow-hidden">
@@ -83,6 +102,7 @@ export default function SalesTab({ scannedBarcode, onResetScannedBarcode, theme 
                 cashFinalTotal={cartState.cashFinalTotal}
                 cardFinalTotal={cartState.cardFinalTotal}
                 onUpdateQuantity={cartState.updateQuantity}
+                onSetQuantity={cartState.setQuantity}
                 onRemoveFromCart={cartState.removeFromCart}
                 onClearCart={cartState.clearCart}
                 onDiscountChange={cartState.setDiscount}

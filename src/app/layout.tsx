@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Outfit } from "next/font/google";
+import { ModalProvider } from "@/providers/ModalProvider";
 import "./globals.css";
 
 const outfit = Outfit({
@@ -21,7 +22,9 @@ export default function RootLayout({
   return (
     <html lang="tr" className={`dark ${outfit.variable}`}>
       <body className="antialiased bg-[#0b0f19] text-slate-100 font-sans selection:bg-blue-600 selection:text-white">
-        {children}
+        <ModalProvider>
+          {children}
+        </ModalProvider>
       </body>
     </html>
   );

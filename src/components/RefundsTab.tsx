@@ -4,15 +4,23 @@ import React, { useState, useEffect } from 'react';
 import { dbIPC, Sale, SaleItem } from '@/lib/ipc';
 import { soundFX } from '@/lib/sound-effects';
 import { ArrowUUpLeft as Undo2, MagnifyingGlass as Search, Receipt, Calendar, CheckCircle as CheckCircle2, WarningCircle as AlertCircle, ArrowsClockwise as RefreshCw, X, Trash as Trash2, Funnel as Filter } from '@phosphor-icons/react';
+import { useModal } from '@/providers/ModalProvider';
 
 interface RefundsTabProps {
     theme?: 'cream' | 'dark';
 }
 
 export default function RefundsTab({ theme = 'cream' }: RefundsTabProps) {
+    const { showAlert, showConfirm } = useModal();
     const isCream = theme === 'cream';
     const [sales, setSales] = useState<Sale[]>([]);
-    const [dateStart, setDateStart] = useState<string>('');
+    // BUG-12 FIX: Default to last 30 days to avoid loading entire sale history on mount
+    const getDefaultDateStart = () => {
+        const d = new Date();
+        d.setDate(d.getDate() - 30);
+        return d.toISOString().substring(0, 10);
+    };
+    const [dateStart, setDateStart] = useState<string>(getDefaultDateStart());
     const [dateEnd, setDateEnd] = useState<string>('');
     const [searchReceipt, setSearchReceipt] = useState<string>('');
     const [statusFilter, setStatusFilter] = useState<'Tümü' | 'İade Edilenler' | 'Tamamlananlar'>('Tümü');
@@ -40,22 +48,22 @@ export default function RefundsTab({ theme = 'cream' }: RefundsTabProps) {
     const handleExecuteRefund = async () => {
         if (!selectedSale || isProcessing) return;
         soundFX.playClick();
-        if (!confirm(`${selectedSale.receipt_no} numaralı satışı İADE etmek istediğinize emin misiniz?\nÜrün stokları veritabanına geri eklenecektir.`)) return;
+        if (!(await showConfirm(`${selectedSale.receipt_no} numaralı satışı İADE etmek istediğinize emin misiniz?\nÜrün stokları veritabanına geri eklenecektir.`))) return;
 
         setIsProcessing(true);
         try {
             const ok = await dbIPC.processRefund(selectedSale.id);
             if (ok) {
                 soundFX.playSuccess();
-                alert('Satış başarıyla iade edildi ve stoklar güncellendi.');
+                showAlert('Satış başarıyla iade edildi ve stoklar güncellendi.');
                 setSelectedSale(null);
                 setSaleItems([]);
                 loadSales();
             } else {
-                alert('Bu satış zaten iade edilmiş veya geçersiz.');
+                showAlert('Bu satış zaten iade edilmiş veya geçersiz.');
             }
         } catch (err: any) {
-            alert('İade işleminde hata: ' + err.message);
+            showAlert('İade işleminde hata: ' + err.message);
         } finally {
             setIsProcessing(false);
         }
@@ -63,7 +71,7 @@ export default function RefundsTab({ theme = 'cream' }: RefundsTabProps) {
 
     const handleDeleteSingleSale = async (sale: Sale) => {
         soundFX.playClick();
-        if (!confirm(`${sale.receipt_no} numaralı fiş/iade kaydı veritabanından TAMAMEN SİLİNECEKTİR.\n\nSilinen kayıtlar artık listede ve iade loglarında gözükmeyecektir. Emin misiniz?`)) return;
+        if (!(await showConfirm(`${sale.receipt_no} numaralı fiş/iade kaydı veritabanından TAMAMEN SİLİNECEKTİR.\n\nSilinen kayıtlar artık listede ve iade loglarında gözükmeyecektir. Emin misiniz?`))) return;
 
         setIsProcessing(true);
         try {
@@ -76,7 +84,7 @@ export default function RefundsTab({ theme = 'cream' }: RefundsTabProps) {
             setSelectedSaleIds(prev => prev.filter(id => id !== sale.id));
             loadSales();
         } catch (err: any) {
-            alert('Silme işleminde hata: ' + err.message);
+            showAlert('Silme işleminde hata: ' + err.message);
         } finally {
             setIsProcessing(false);
         }
@@ -85,7 +93,7 @@ export default function RefundsTab({ theme = 'cream' }: RefundsTabProps) {
     const handleDeleteSelectedSales = async () => {
         if (selectedSaleIds.length === 0 || isProcessing) return;
         soundFX.playClick();
-        if (!confirm(`Seçilen ${selectedSaleIds.length} adet fiş/iade kaydı veritabanından KALICI OLARAK SİLİNECEKTİR.\n\nSilinen kayıtlar artık listede ve iade geçmişinde gözükmeyecektir. Emin misiniz?`)) return;
+        if (!(await showConfirm(`Seçilen ${selectedSaleIds.length} adet fiş/iade kaydı veritabanından KALICI OLARAK SİLİNECEKTİR.\n\nSilinen kayıtlar artık listede ve iade geçmişinde gözükmeyecektir. Emin misiniz?`))) return;
 
         setIsProcessing(true);
         try {
@@ -98,7 +106,7 @@ export default function RefundsTab({ theme = 'cream' }: RefundsTabProps) {
             setSelectedSaleIds([]);
             loadSales();
         } catch (err: any) {
-            alert('Toplu silme işleminde hata: ' + err.message);
+            showAlert('Toplu silme işleminde hata: ' + err.message);
         } finally {
             setIsProcessing(false);
         }

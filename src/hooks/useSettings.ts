@@ -1,16 +1,21 @@
 import { useState, useEffect } from 'react';
 import { dbIPC } from '@/lib/ipc';
 import { soundFX } from '@/lib/sound-effects';
+import { useModal } from '@/providers/ModalProvider';
 
 export function useSettings(onThemeChange?: (theme: 'cream' | 'dark') => void) {
+    const { showAlert, showConfirm, showPrompt } = useModal();
     const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
     const [settings, setSettings] = useState<Record<string, string>>({
         company_name: 'ZUZU PET',
         company_phone: '0555 123 45 67',
         company_address: 'Antalya, Türkiye',
         receipt_footer: 'Bizi Tercih Ettiğiniz İçin Teşekkür Ederiz!',
+        invoice_footer_note: '',
         tax_rate: '20',
         gemini_api_key: '',
+        openrouter_api_key: '',
+        active_ai_provider: 'gemini',
         receipt_template: 'compact_minimal',
         app_theme: 'cream',
         pos_connection_type: 'ethernet',
@@ -89,7 +94,7 @@ export function useSettings(onThemeChange?: (theme: 'cream' | 'dark') => void) {
     };
 
     const handleDeleteCategory = async (catName: string) => {
-        if (confirm(`'${catName}' kategorisini veritabanından silmek istediğinize emin misiniz?`)) {
+        if (await showConfirm(`'${catName}' kategorisini veritabanından silmek istediğinize emin misiniz?`)) {
             await dbIPC.deleteCategory(catName);
             const copy = { ...categoryMargins };
             delete copy[catName];
@@ -99,14 +104,14 @@ export function useSettings(onThemeChange?: (theme: 'cream' | 'dark') => void) {
     };
 
     const handleBatchUpdatePrices = async (catName: string, cashMargin: number, cardMargin: number) => {
-        if (confirm(`'${catName}' kategorisindeki tüm ürünlerin satış fiyatı (Nakit: %${cashMargin}, Kart: %${cardMargin}) yeniden hesaplanacak. Onaylıyor musunuz?`)) {
+        if (await showConfirm(`'${catName}' kategorisindeki tüm ürünlerin satış fiyatı (Nakit: %${cashMargin}, Kart: %${cardMargin}) yeniden hesaplanacak. Onaylıyor musunuz?`)) {
             setUpdatingCat(catName);
             try {
                 const res = await dbIPC.updateCategoryProductPrices(catName, cashMargin, cardMargin);
                 soundFX.playSuccess();
-                alert(`'${catName}' kategorisindeki ${res.updatedCount} adet ürünün fiyatları başarıyla güncellendi!`);
+                showAlert(`'${catName}' kategorisindeki ${res.updatedCount} adet ürünün fiyatları başarıyla güncellendi!`);
             } catch (err: any) {
-                alert('Güncelleme hatası: ' + err.message);
+                showAlert('Güncelleme hatası: ' + err.message);
             } finally {
                 setUpdatingCat(null);
             }
@@ -136,9 +141,32 @@ export function useSettings(onThemeChange?: (theme: 'cream' | 'dark') => void) {
     };
 
     const handleClearDatabase = async () => {
-        if (confirm('DİKKAT: Veritabanındaki tüm ürünler, satışlar ve stok kayıtları tamamen silinecektir.\nDevam etmek istediğinize emin misiniz?')) {
+        soundFX.playClick();
+        if (!(await showConfirm('DİKKAT: Veritabanındaki tüm ürünler, satışlar ve stok kayıtları tamamen silinecektir.\nDevam etmek istediğinize emin misiniz?'))) {
+            return;
+        }
+        
+        const userInput = await showPrompt('İşlemi onaylamak için kutucuğa SIFIRLA yazın:');
+        if (userInput !== 'SIFIRLA') {
+            showAlert('İşlem iptal edildi.');
+            return;
+        }
+
+        try {
+            const backupRes = await dbIPC.performBackupNow();
+            if (backupRes?.success) {
+                showAlert(`Otomatik yedek alındı: ${backupRes.filePath}\nVeritabanı sıfırlanıyor...`);
+            } else {
+                if (!(await showConfirm(`Otomatik yedek alınamadı (${backupRes?.error || 'Bilinmeyen hata'}).\nYine de sıfırlamak istiyor musunuz?`))) {
+                    return;
+                }
+            }
+            
             await dbIPC.clearEntireDatabase(true);
-            alert('Veritabanı sıfırlandı.');
+            showAlert('Veritabanı başarıyla sıfırlandı.');
+            soundFX.playSuccess();
+        } catch (e: any) {
+            showAlert(`Hata oluştu: ${e.message}`);
         }
     };
 
@@ -148,31 +176,31 @@ export function useSettings(onThemeChange?: (theme: 'cream' | 'dark') => void) {
             const res = await dbIPC.exportBackup();
             if (res?.canceled) return;
             if (res?.success) {
-                alert('✓ Veritabanı yedeği başarıyla dışa aktarıldı!');
+                showAlert('✓ Veritabanı yedeği başarıyla dışa aktarıldı!');
                 soundFX.playSuccess();
             } else {
-                alert(`Hata: ${res?.error || 'Yedek oluşturulamadı.'}`);
+                showAlert(`Hata: ${res?.error || 'Yedek oluşturulamadı.'}`);
             }
         } catch (e: any) {
-            alert(`Hata: ${e.message}`);
+            showAlert(`Hata: ${e.message}`);
         }
     };
 
     const handleImportBackup = async () => {
         soundFX.playClick();
-        if (!confirm('DİKKAT: Seçtiğiniz yedek veritabanı yüklenecek ve mevcut verilerin üzerine yazılacaktır! Devam etmek istediğinize emin misiniz?')) return;
+        if (!(await showConfirm('DİKKAT: Seçtiğiniz yedek veritabanı yüklenecek ve mevcut verilerin üzerine yazılacaktır! Devam etmek istediğinize emin misiniz?'))) return;
         try {
             const res = await dbIPC.importBackup();
             if (res?.canceled) return;
             if (res?.success) {
-                alert('✓ Veritabanı yedeği başarıyla geri yüklendi! Sayfa yenileniyor...');
+                showAlert('✓ Veritabanı yedeği başarıyla geri yüklendi! Sayfa yenileniyor...');
                 soundFX.playSuccess();
                 setTimeout(() => window.location.reload(), 1000);
             } else {
-                alert(`Hata: ${res?.error || 'Veritabanı geri yüklenemedi.'}`);
+                showAlert(`Hata: ${res?.error || 'Veritabanı geri yüklenemedi.'}`);
             }
         } catch (e: any) {
-            alert(`Hata: ${e.message}`);
+            showAlert(`Hata: ${e.message}`);
         }
     };
 
@@ -182,30 +210,29 @@ export function useSettings(onThemeChange?: (theme: 'cream' | 'dark') => void) {
             const res = await dbIPC.exportBarcodes();
             if (res?.canceled) return;
             if (res?.success) {
-                alert('✓ Barkodlar başarıyla dışa aktarıldı!');
+                showAlert('✓ Barkodlar başarıyla dışa aktarıldı!');
                 soundFX.playSuccess();
             } else {
-                alert(`Hata: ${res?.error || 'Barkodlar dışa aktarılamadı.'}`);
+                showAlert(`Hata: ${res?.error || 'Barkodlar dışa aktarılamadı.'}`);
             }
         } catch (e: any) {
-            alert(`Hata: ${e.message}`);
+            showAlert(`Hata: ${e.message}`);
         }
     };
 
     const handleImportBarcodes = async () => {
         soundFX.playClick();
-        if (!confirm('DİKKAT: Seçtiğiniz dosyadaki barkodlar isim eşleşmesine göre mevcut ürünlerin üzerine yazılacaktır. İşleme devam edilsin mi?')) return;
         try {
             const res = await dbIPC.importBarcodes();
             if (res?.canceled) return;
             if (res?.success) {
-                alert(`✓ ${res?.updatedCount} ürünün barkodu başarıyla güncellendi!`);
+                showAlert(`✓ ${res?.updatedCount} ürünün barkodu başarıyla güncellendi!`);
                 soundFX.playSuccess();
             } else {
-                alert(`Hata: ${res?.error || 'Barkodlar içe aktarılamadı.'}`);
+                showAlert(`Hata: ${res?.error || 'Barkodlar içe aktarılamadı.'}`);
             }
         } catch (e: any) {
-            alert(`Hata: ${e.message}`);
+            showAlert(`Hata: ${e.message}`);
         }
     };
 

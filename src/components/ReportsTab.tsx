@@ -4,12 +4,14 @@ import React, { useState, useEffect } from 'react';
 import { dbIPC, printerIPC, DailySummary, EndOfDayReport } from '@/lib/ipc';
 import { generateReceiptHTML } from '@/lib/receipt-printer';
 import { ChartBar as BarChart3, TrendUp as TrendingUp, CurrencyDollar as DollarSign, CreditCard, Money as Banknote, Calendar, Printer, Trophy as Award, FileCsv as FileSpreadsheet } from '@phosphor-icons/react';
+import { useModal } from '@/providers/ModalProvider';
 
 interface ReportsTabProps {
     theme?: 'cream' | 'dark';
 }
 
 export default function ReportsTab({ theme = 'cream' }: ReportsTabProps) {
+    const { showAlert } = useModal();
     const isCream = theme === 'cream';
     const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().substring(0, 10));
     const [summary, setSummary] = useState<DailySummary | null>(null);
@@ -83,9 +85,43 @@ export default function ReportsTab({ theme = 'cream' }: ReportsTabProps) {
             await printerIPC.printThermalReceipt(fullZHtml);
         } catch (err: any) {
             console.error('Z Report print error:', err);
+            // BUG-13 FIX: Show error to user instead of silently failing
+            showAlert(`Z Raporu yazdırma hatası: ${err.message || 'Bilinmeyen hata'}. Termal yazıcı bağlantısını kontrol edin.`);
         } finally {
             setIsPrinting(false);
         }
+    };
+
+    const handleExportCSV = () => {
+        if (!summary || !zReport) return;
+        
+        let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
+        
+        // Header
+        csvContent += `Tarih,${selectedDate}\n`;
+        csvContent += `Toplam Satis Adedi,${summary.total_sales_count}\n`;
+        csvContent += `Toplam Ciro,${summary.total_turnover.toFixed(2)} TL\n`;
+        csvContent += `Nakit Toplam,${summary.cash_turnover.toFixed(2)} TL\n`;
+        csvContent += `Kredi Karti Toplam,${summary.card_turnover.toFixed(2)} TL\n`;
+        csvContent += `Hesaplanan KDV,${summary.total_tax.toFixed(2)} TL\n`;
+        csvContent += `Tahmini Net Kar,${summary.net_profit.toFixed(2)} TL\n\n`;
+        
+        // Items Header
+        csvContent += "Urun Adi,Satilan Adet,Toplam Tutar (TL)\n";
+        
+        // Items Data
+        zReport.items_sold.forEach(item => {
+            const name = item.name.replace(/"/g, '""'); // escape quotes
+            csvContent += `"${name}",${item.total_qty},${item.total_revenue.toFixed(2)}\n`;
+        });
+        
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `kasa_rapor_${selectedDate}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     };
 
     return (
@@ -122,6 +158,19 @@ export default function ReportsTab({ theme = 'cream' }: ReportsTabProps) {
                             className={`bg-transparent font-black focus:outline-none ${isCream ? 'text-slate-950' : 'text-slate-100'}`}
                         />
                     </div>
+
+                    {/* CSV Export Button */}
+                    <button
+                        onClick={handleExportCSV}
+                        disabled={!summary || !zReport}
+                        className={`font-black px-3.5 py-1.5 rounded-xl text-xs flex items-center space-x-1.5 shadow-md transition active:scale-95 disabled:opacity-50 ${
+                            isCream ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                        }`}
+                        title="CSV Olarak Dışa Aktar"
+                    >
+                        <FileSpreadsheet strokeWidth={2} className="h-4 w-4" />
+                        <span>CSV Aktar</span>
+                    </button>
 
                     {/* Print Z-Report Button */}
                     <button

@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { dbIPC, Product } from '@/lib/ipc';
 import { soundFX } from '@/lib/sound-effects';
+import { useModal } from '@/providers/ModalProvider';
 
 export function useProducts(scannedBarcode?: string, onResetScannedBarcode?: () => void) {
+    const { showAlert, showConfirm } = useModal();
     const [products, setProducts] = useState<Product[]>([]);
     const [categories, setCategories] = useState<string[]>([]);
     const [categoryMargins, setCategoryMargins] = useState<Record<string, { cash: number; card: number }>>({});
@@ -206,7 +208,7 @@ export function useProducts(scannedBarcode?: string, onResetScannedBarcode?: () 
     };
 
     const handleDeleteProduct = async (id: number) => {
-        if (confirm('Bu ürünü silmek istediğinize emin misiniz?')) {
+        if (await showConfirm('Bu ürünü silmek istediğinize emin misiniz?')) {
             await dbIPC.deleteProduct(id);
             loadData();
         }
@@ -221,11 +223,11 @@ export function useProducts(scannedBarcode?: string, onResetScannedBarcode?: () 
         const bcodeClean = formData.barcode.trim() || null;
 
         if (!formData.name.trim()) {
-            alert('Lütfen ürün adını girin.');
+            showAlert('Lütfen ürün adını girin.');
             return;
         }
         if (salePrice <= 0) {
-            alert('Lütfen geçerli bir satış fiyatı girin.');
+            showAlert('Lütfen geçerli bir satış fiyatı girin.');
             return;
         }
 

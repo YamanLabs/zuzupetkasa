@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { aiIPC, dbIPC, Product } from '@/lib/ipc';
 import { AICustomRule } from './useAIRules';
+import { useModal } from '@/providers/ModalProvider';
 
 export interface AIParsedItem {
     name: string;
@@ -24,19 +25,26 @@ interface UseAIAnalysisProps {
 }
 
 export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: UseAIAnalysisProps) {
+    const { showAlert } = useModal();
     const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
     const [filePreviews, setFilePreviews] = useState<string[]>([]);
     const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
     const [statusMessage, setStatusMessage] = useState<string>('');
+    const [aiProgress, setAiProgress] = useState<{ current: number; total: number; message: string } | null>(null);
     const [parsedItems, setParsedItems] = useState<AIParsedItem[]>([]);
     const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(null);
     const [isSaving, setIsSaving] = useState<boolean>(false);
     const [categoryMargins, setCategoryMargins] = useState<Record<string, { cash: number; card: number }>>({});
     const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+    
+    // Bulk operations
+    const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
 
     const [invoiceServiceFee, setInvoiceServiceFee] = useState<number>(0);
     const [totalProductQuantity, setTotalProductQuantity] = useState<number>(0);
     const [serviceFeePerUnit, setServiceFeePerUnit] = useState<number>(0);
+
+    const filePreviewsRef = useRef<string[]>([]);
 
     const loadCategoryData = async () => {
         const margins = await dbIPC.getCategoryMargins();
@@ -44,18 +52,34 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
         setAvailableCategories(Object.keys(margins));
     };
 
+    // BUG-19 FIX: Revoke all objectURLs when component unmounts to prevent memory leak
+    useEffect(() => {
+        const removeProgressLsn = aiIPC.onAIProgress((data) => {
+            setAiProgress({ current: data.currentBatch, total: data.totalBatches, message: data.message });
+        });
+        
+        return () => {
+            removeProgressLsn();
+            filePreviewsRef.current.forEach(url => URL.revokeObjectURL(url));
+        };
+    }, []);
+
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files) return;
         const files = Array.from(e.target.files);
         setSelectedFiles(prev => [...prev, ...files]);
 
         const previews = files.map(file => URL.createObjectURL(file));
+        // BUG-19 FIX: Track all created objectURLs for cleanup
+        filePreviewsRef.current = [...filePreviewsRef.current, ...previews];
         setFilePreviews(prev => [...prev, ...previews]);
     };
 
     const handleRemoveFile = (index: number) => {
         setFilePreviews(prev => {
             URL.revokeObjectURL(prev[index]);
+            // BUG-19 FIX: Remove revoked URL from ref tracking
+            filePreviewsRef.current = filePreviewsRef.current.filter((_, i) => i !== index);
             return prev.filter((_, i) => i !== index);
         });
         setSelectedFiles(prev => prev.filter((_, i) => i !== index));
@@ -73,11 +97,14 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
     const handleRunAIAnalysis = async () => {
         if (selectedFiles.length === 0) return;
         setIsAnalyzing(true);
-        setStatusMessage('Gemini AI Fatura Analizi Ediliyor...');
+        setAiProgress(null);
+        setStatusMessage('AI Fatura Analiz Ediyor...');
 
         try {
             const base64List = await Promise.all(selectedFiles.map(convertFileToBase64));
             const result = await aiIPC.analyzeInvoiceImages(base64List);
+
+            setAiProgress(null);
 
             if (result.success) {
                 setStatusMessage(result.message);
@@ -270,10 +297,12 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
                 const firstNoBcode = enrichedItems.findIndex(i => !i.barcode);
                 if (firstNoBcode !== -1) setSelectedItemIndex(firstNoBcode);
             } else {
-                alert('AI Fatura Analiz Hatası: ' + result.message);
+                // BUG-08 FIX: Clear old parsed items when analysis fails so stale data is not shown
+                setParsedItems([]);
+                showAlert('AI Fatura Analiz Hatası: ' + result.message);
             }
         } catch (err: any) {
-            alert('Analiz hatası: ' + err.message);
+            showAlert('Analiz hatası: ' + err.message);
         } finally {
             setIsAnalyzing(false);
         }
@@ -362,13 +391,79 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
     };
 
     const handleRemoveParsedItem = (index: number) => {
-        setParsedItems(prev => prev.filter((_, i) => i !== index));
-        setSelectedItemIndex(prev => {
-            if (prev === null) return null;
-            if (prev === index) return null;
-            if (prev > index) return prev - 1;
-            return prev;
+        setParsedItems(prev => {
+            const newArr = [...prev];
+            newArr.splice(index, 1);
+            return newArr;
         });
+        if (selectedItemIndex === index) {
+            setSelectedItemIndex(null);
+        } else if (selectedItemIndex !== null && selectedItemIndex > index) {
+            setSelectedItemIndex(selectedItemIndex - 1);
+        }
+        setSelectedIndices(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(index);
+            const updatedSet = new Set<number>();
+            newSet.forEach(i => {
+                if (i > index) updatedSet.add(i - 1);
+                else updatedSet.add(i);
+            });
+            return updatedSet;
+        });
+    };
+
+    const handleToggleSelectIndex = (index: number) => {
+        setSelectedIndices(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(index)) {
+                newSet.delete(index);
+            } else {
+                newSet.add(index);
+            }
+            return newSet;
+        });
+    };
+
+    const handleSelectAll = (selectAll: boolean) => {
+        if (selectAll) {
+            setSelectedIndices(new Set(parsedItems.map((_, i) => i)));
+        } else {
+            setSelectedIndices(new Set());
+        }
+    };
+
+    const handleBulkCategoryChange = (newCat: string) => {
+        if (selectedIndices.size === 0) return;
+        setParsedItems(prev => {
+            const arr = [...prev];
+            selectedIndices.forEach(idx => {
+                if (arr[idx]) {
+                    const catObj = categoryMargins[newCat];
+                    const cashMargin = typeof catObj === 'object' && catObj !== null ? catObj.cash : (Number(catObj) || 30);
+                    const baseCost = arr[idx].effective_cost || arr[idx].unit_cost_with_tax || arr[idx].cost_price;
+                    const computedSalePrice = baseCost > 0 
+                        ? Number((baseCost * (1 + cashMargin / 100)).toFixed(2)) 
+                        : arr[idx].sale_price;
+                    
+                    arr[idx] = {
+                        ...arr[idx],
+                        category: newCat,
+                        sale_price: computedSalePrice
+                    };
+                }
+            });
+            return arr;
+        });
+    };
+
+    const handleBulkRemove = () => {
+        if (selectedIndices.size === 0) return;
+        setParsedItems(prev => {
+            return prev.filter((_, i) => !selectedIndices.has(i));
+        });
+        setSelectedIndices(new Set());
+        setSelectedItemIndex(null);
     };
 
     const handleAssignScannedBarcode = async (barcode: string) => {
@@ -384,7 +479,11 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
         const dbProducts = await dbIPC.getProducts('', 'Tümü');
         const matched = dbProducts.find(p => p.barcode && p.barcode.trim() === cleanCode) || null;
 
-        setParsedItems(prev => prev.map((item, idx) => {
+        const itemName = parsedItems[targetIndex]?.name || 'Ürün';
+
+        // BUG-15 FIX: Calculate next no-barcode index from current state BEFORE setParsedItems
+        // This avoids stale closure issues where findIndex would still see the old (un-assigned) items
+        const updatedItems = parsedItems.map((item, idx) => {
             if (idx !== targetIndex) return item;
             return {
                 ...item,
@@ -392,16 +491,18 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
                 matchedProduct: matched || item.matchedProduct,
                 originalMatchedProduct: matched || item.originalMatchedProduct
             };
-        }));
+        });
 
-        const itemName = parsedItems[targetIndex]?.name || 'Ürün';
+        setParsedItems(updatedItems);
+
         setStatusMessage(`Barkod [${cleanCode}] "${itemName}" kaleme atandı!`);
 
-        const nextNoBarcodeIndex = parsedItems.findIndex((item, idx) => idx > targetIndex && !item.barcode);
+        // Find next no-barcode item from the updated array (not stale parsedItems)
+        const nextNoBarcodeIndex = updatedItems.findIndex((item, idx) => idx > (targetIndex as number) && !item.barcode);
         if (nextNoBarcodeIndex !== -1) {
             setSelectedItemIndex(nextNoBarcodeIndex);
-        } else if (targetIndex < parsedItems.length - 1) {
-            setSelectedItemIndex(targetIndex + 1);
+        } else if ((targetIndex as number) < updatedItems.length - 1) {
+            setSelectedItemIndex((targetIndex as number) + 1);
         }
     };
 
@@ -412,12 +513,19 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
         try {
             for (const item of parsedItems) {
                 if (item.matchedProduct) {
+                    const catObj = categoryMargins[item.category];
+                    const cardMargin = typeof catObj === 'object' && catObj !== null ? catObj.card : (Number(catObj) || 35);
+                    const newCardPrice = item.cost_price > 0
+                        ? Number((item.cost_price * (1 + cardMargin / 100)).toFixed(2))
+                        : (item.matchedProduct.card_price || item.matchedProduct.sale_price);
+
                     await dbIPC.updateProduct(item.matchedProduct.id, {
                         ...item.matchedProduct,
                         category: item.category || item.matchedProduct.category,
                         stock_quantity: item.matchedProduct.stock_quantity + item.quantity,
                         cost_price: item.cost_price,
-                        sale_price: item.sale_price > 0 ? item.sale_price : item.matchedProduct.sale_price
+                        sale_price: item.sale_price > 0 ? item.sale_price : item.matchedProduct.sale_price,
+                        card_price: newCardPrice
                     });
                 } else {
                     await dbIPC.addOrUpdateStockByBarcode(
@@ -432,13 +540,13 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
                 }
             }
 
-            alert('Tüm fatura kalemleri kategorileriyle birlikte veritabanı stoğuna aktarıldı!');
+            showAlert('Tüm fatura kalemleri kategorileriyle birlikte veritabanı stoğuna aktarıldı!');
             setParsedItems([]);
             setSelectedFiles([]);
             setFilePreviews([]);
             setStatusMessage('');
         } catch (err: any) {
-            alert('Stok aktarımında hata: ' + err.message);
+            showAlert('Stok aktarımında hata: ' + err.message);
         } finally {
             setIsSaving(false);
         }
@@ -449,9 +557,15 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
         parsedItems, setParsedItems, selectedItemIndex, setSelectedItemIndex,
         isSaving, categoryMargins, availableCategories,
         invoiceServiceFee, totalProductQuantity, serviceFeePerUnit,
+        selectedIndices,
+        handleSelectAll,
+        handleToggleSelectIndex,
+        handleBulkCategoryChange,
+        handleBulkRemove,
         loadCategoryData, handleFileSelect, handleRemoveFile,
         handleRunAIAnalysis, handleServiceFeeChange, handleCategoryChange,
         handleItemFieldChange, handleCommitStockToDatabase,
-        handleRemoveParsedItem, handleAssignScannedBarcode, handleToggleMatchedStatus
+        handleRemoveParsedItem, handleAssignScannedBarcode, handleToggleMatchedStatus,
+        aiProgress
     };
 }

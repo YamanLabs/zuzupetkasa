@@ -7,13 +7,14 @@ interface AIUploadGalleryProps {
     filePreviews: string[];
     isAnalyzing: boolean;
     statusMessage: string;
+    aiProgress?: { current: number; total: number; message: string } | null;
     onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onRemoveFile: (index: number) => void;
     onRunAnalysis: () => void;
 }
 
 export default function AIUploadGallery({
-    theme, selectedFiles, filePreviews, isAnalyzing, statusMessage,
+    theme, selectedFiles, filePreviews, isAnalyzing, statusMessage, aiProgress,
     onFileSelect, onRemoveFile, onRunAnalysis
 }: AIUploadGalleryProps) {
     const isCream = theme === 'cream';
@@ -82,12 +83,28 @@ export default function AIUploadGallery({
                 </button>
             )}
 
-            {statusMessage && (
+            {statusMessage && !aiProgress && (
                 <div className={`text-xs px-2.5 py-1 rounded-xl font-extrabold flex items-center space-x-1 flex-shrink-0 ${
                     isCream ? 'bg-purple-100 text-purple-950 border border-purple-300' : 'bg-purple-950/80 text-purple-300 border border-purple-500/40'
                 }`}>
                     <span className="w-2 h-2 rounded-full bg-purple-500 animate-ping" />
                     <span className="text-[11px]">{statusMessage}</span>
+                </div>
+            )}
+
+            {/* Progress Bar (IMP-12) */}
+            {aiProgress && isAnalyzing && (
+                <div className={`flex flex-col flex-shrink-0 w-48 ${isCream ? 'text-slate-900' : 'text-slate-200'}`}>
+                    <div className="flex justify-between items-center text-[10px] font-bold mb-1">
+                        <span>{aiProgress.message}</span>
+                        <span>{Math.round((aiProgress.current / aiProgress.total) * 100)}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div 
+                            className="h-full bg-purple-500 transition-all duration-500 ease-out rounded-full"
+                            style={{ width: `${(aiProgress.current / aiProgress.total) * 100}%` }}
+                        />
+                    </div>
                 </div>
             )}
         </div>

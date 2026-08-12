@@ -16,6 +16,7 @@ interface SalesCartProps {
     cashFinalTotal: number;
     cardFinalTotal: number;
     onUpdateQuantity: (productId: number, delta: number) => void;
+    onSetQuantity: (productId: number, qty: number) => void;
     onRemoveFromCart: (productId: number) => void;
     onClearCart: () => void;
     onDiscountChange: (val: number) => void;
@@ -31,6 +32,7 @@ export default function SalesCart({
     cashFinalTotal,
     cardFinalTotal,
     onUpdateQuantity,
+    onSetQuantity,
     onRemoveFromCart,
     onClearCart,
     onDiscountChange,
@@ -126,9 +128,26 @@ export default function SalesCart({
                             >
                                 <Minus strokeWidth={2.5} className="h-3 w-3" />
                             </button>
-                            <span className={`w-6 text-center font-black text-xs font-mono ${isCream ? 'text-slate-900' : 'text-white'}`}>
-                                {item.quantity}
-                            </span>
+                            <input
+                                type="number"
+                                min="1"
+                                value={item.quantity || ''}
+                                onChange={(e) => {
+                                    const val = parseInt(e.target.value, 10);
+                                    if (!isNaN(val) && val > 0) {
+                                        onSetQuantity(item.product.id, val);
+                                    } else if (e.target.value === '') {
+                                        // Allow clearing input temporarily
+                                        onSetQuantity(item.product.id, 0);
+                                    }
+                                }}
+                                onBlur={() => {
+                                    if (item.quantity === 0) {
+                                        onSetQuantity(item.product.id, 1);
+                                    }
+                                }}
+                                className={`w-8 text-center font-black text-xs font-mono outline-none bg-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${isCream ? 'text-slate-900' : 'text-white'}`}
+                            />
                             <button
                                 onClick={() => onUpdateQuantity(item.product.id, 1)}
                                 className={`p-1 rounded-lg border transition active:scale-90 ${

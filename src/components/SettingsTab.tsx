@@ -24,6 +24,7 @@ interface SettingsTabProps {
 export default function SettingsTab({ theme = 'cream', onThemeChange }: SettingsTabProps) {
     const isCream = theme === 'cream';
     const s = useSettings(onThemeChange);
+    const [showConfirmModal, setShowConfirmModal] = React.useState(false);
 
     const handleSettingsChange = (key: string, value: string) => {
         s.setSettings(prev => ({ ...prev, [key]: value }));
@@ -152,7 +153,7 @@ export default function SettingsTab({ theme = 'cream', onThemeChange }: Settings
                     <SettingsService 
                         theme={theme}
                         onExportBarcodes={s.handleExportBarcodes}
-                        onImportBarcodes={s.handleImportBarcodes}
+                        onImportBarcodes={() => setShowConfirmModal(true)}
                     />
                 )}
 
@@ -283,6 +284,46 @@ export default function SettingsTab({ theme = 'cream', onThemeChange }: Settings
                             >
                                 <Link className="h-4 w-4" weight="bold" />
                                 <span>inPOS Cihazını Eşle</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Custom Confirm Modal */}
+            {showConfirmModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm">
+                    <div className={`w-full max-w-sm rounded-2xl border shadow-2xl p-5 flex flex-col space-y-4 relative overflow-hidden transition-all transform scale-100 ${
+                        isCream ? 'bg-[#faf8f2] border-[#d8d1c2] text-slate-900' : 'bg-slate-900 border-slate-800 text-slate-100'
+                    }`}>
+                        <div className="flex flex-col space-y-2 text-center">
+                            <h3 className="text-base font-black tracking-tight text-red-500">DİKKAT</h3>
+                            <p className={`text-xs font-bold leading-relaxed ${isCream ? 'text-slate-700' : 'text-slate-300'}`}>
+                                Seçtiğiniz dosyadaki barkodlar isim eşleşmesine göre mevcut ürünlerin üzerine yazılacaktır.
+                            </p>
+                            <p className={`text-xs font-bold ${isCream ? 'text-slate-900' : 'text-slate-100'}`}>
+                                İşleme devam edilsin mi?
+                            </p>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-3 pt-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowConfirmModal(false)}
+                                className={`font-black py-2.5 rounded-xl text-xs transition active:scale-95 ${
+                                    isCream ? 'bg-slate-200 hover:bg-slate-300 text-slate-800' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                }`}
+                            >
+                                İptal
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowConfirmModal(false);
+                                    s.handleImportBarcodes();
+                                }}
+                                className="font-black py-2.5 rounded-xl text-xs transition active:scale-95 bg-red-600 hover:bg-red-500 text-white"
+                            >
+                                Evet, Devam Et
                             </button>
                         </div>
                     </div>

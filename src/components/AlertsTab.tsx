@@ -36,9 +36,12 @@ export default function AlertsTab({ theme = 'cream' }: AlertsTabProps) {
         e.preventDefault();
         if (!selectedProduct || addQuantity <= 0) return;
 
+        // BUG-14 FIX: Pass explicit reason so stock log shows 'Kritik Stok Tamamlama'
+        // instead of generic 'Manuel Stok Düzenlemesi'
         await dbIPC.updateProduct(selectedProduct.id, {
             ...selectedProduct,
-            stock_quantity: selectedProduct.stock_quantity + addQuantity
+            stock_quantity: selectedProduct.stock_quantity + addQuantity,
+            _stockLogReason: 'Kritik Stok Tamamlama'
         });
 
         setShowReplenishModal(false);

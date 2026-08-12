@@ -10,6 +10,7 @@ import AIParsedTable from './aistock/AIParsedTable';
 import AIRulesModal from './aistock/AIRulesModal';
 import AIDoubleCheckModal from './aistock/AIDoubleCheckModal';
 import AISettingsModal from './aistock/AISettingsModal';
+import AICommitModal from './aistock/AICommitModal';
 
 import { useAIStockContext } from '@/providers/AIStockProvider';
 
@@ -22,6 +23,7 @@ interface AIStockTabProps {
 export default function AIStockTab({ scannedBarcode, onResetScannedBarcode, theme = 'cream' }: AIStockTabProps) {
     const isCream = theme === 'cream';
     const { rulesState, settingsState, analysisState, doubleCheckState } = useAIStockContext();
+    const [showCommitModal, setShowCommitModal] = React.useState(false);
 
     useEffect(() => {
         if (scannedBarcode && scannedBarcode.trim()) {
@@ -59,6 +61,7 @@ export default function AIStockTab({ scannedBarcode, onResetScannedBarcode, them
                         filePreviews={analysisState.filePreviews}
                         isAnalyzing={analysisState.isAnalyzing}
                         statusMessage={analysisState.statusMessage}
+                        aiProgress={analysisState.aiProgress}
                         onFileSelect={analysisState.handleFileSelect}
                         onRemoveFile={analysisState.handleRemoveFile}
                         onRunAnalysis={analysisState.handleRunAIAnalysis}
@@ -109,11 +112,16 @@ export default function AIStockTab({ scannedBarcode, onResetScannedBarcode, them
                 invoiceServiceFee={analysisState.invoiceServiceFee}
                 totalProductQuantity={analysisState.totalProductQuantity}
                 serviceFeePerUnit={analysisState.serviceFeePerUnit}
+                selectedIndices={analysisState.selectedIndices}
+                onSelectAll={analysisState.handleSelectAll}
+                onToggleSelectIndex={analysisState.handleToggleSelectIndex}
+                onBulkCategoryChange={analysisState.handleBulkCategoryChange}
+                onBulkRemove={analysisState.handleBulkRemove}
                 onSelectItem={analysisState.setSelectedItemIndex}
                 onServiceFeeChange={analysisState.handleServiceFeeChange}
                 onCategoryChange={analysisState.handleCategoryChange}
                 onItemFieldChange={analysisState.handleItemFieldChange}
-                onCommitStock={analysisState.handleCommitStockToDatabase}
+                onCommitStock={() => setShowCommitModal(true)}
                 onRemoveItem={analysisState.handleRemoveParsedItem}
                 onToggleMatchedStatus={analysisState.handleToggleMatchedStatus}
             />
@@ -139,6 +147,17 @@ export default function AIStockTab({ scannedBarcode, onResetScannedBarcode, them
                         onRemoveRule={rulesState.handleRemoveRule}
                         onCustomPromptTextChange={rulesState.setCustomPromptText}
                         onSaveRules={rulesState.handleSaveRules}
+                    />
+                )}
+                
+                {showCommitModal && (
+                    <AICommitModal 
+                        key="commit-modal"
+                        theme={theme}
+                        show={showCommitModal}
+                        onClose={() => setShowCommitModal(false)}
+                        onConfirm={analysisState.handleCommitStockToDatabase}
+                        parsedItems={analysisState.parsedItems}
                     />
                 )}
 
