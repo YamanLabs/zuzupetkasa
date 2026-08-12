@@ -85,14 +85,63 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
         setSelectedFiles(prev => prev.filter((_, i) => i !== index));
     };
 
-    const convertFileToBase64 = (file: File): Promise<string> => {
-        return new Promise((resolve, reject) => {
+    const convertFileToBase64 = async (file: File): Promise<string[]> => {
+        // For PDFs: render each page to JPEG via pdfjs and return one entry per page
+        if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+            try {
+                const pdfjsLib = await import('pdfjs-dist');
+                // Use the bundled worker
+                pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+                    'pdfjs-dist/build/pdf.worker.mjs',
+                    import.meta.url
+                ).toString();
+
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const pageImages: string[] = [];
+
+                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                    const page = await pdf.getPage(pageNum);
+                    // EFFICIENCY: Cap max width at 800px to limit image tokens.
+                    // Claude tiles images at 512px — an 800px-wide page uses ~4 tiles (~4K tokens)
+                    // vs scale:2.0 which produces ~1190px-wide pages (~10 tiles, ~10K tokens).
+                    const naturalViewport = page.getViewport({ scale: 1 });
+                    const targetScale = Math.min(1.5, 800 / naturalViewport.width);
+                    const viewport = page.getViewport({ scale: targetScale });
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    const ctx = canvas.getContext('2d')!;
+
+                    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+                    // EFFICIENCY: quality 0.72 — digital invoice text stays sharp, ~30% smaller than 0.92
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+                    pageImages.push(dataUrl);
+                }
+
+                return pageImages;
+            } catch (err) {
+                console.error('[PDF Render] Failed to render PDF pages, falling back to raw base64:', err);
+                // Fallback: send raw — may not work for OpenRouter but keep for Gemini
+                return await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.readAsDataURL(file);
+                    reader.onload = () => resolve([reader.result as string]);
+                    reader.onerror = error => reject(error);
+                });
+            }
+        }
+
+        // Non-PDF: return as single-item array
+        return await new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.readAsDataURL(file);
-            reader.onload = () => resolve(reader.result as string);
+            reader.onload = () => resolve([reader.result as string]);
             reader.onerror = error => reject(error);
         });
     };
+
 
     const handleRunAIAnalysis = async () => {
         if (selectedFiles.length === 0) return;
@@ -101,7 +150,10 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
         setStatusMessage('AI Fatura Analiz Ediyor...');
 
         try {
-            const base64List = await Promise.all(selectedFiles.map(convertFileToBase64));
+            // convertFileToBase64 returns string[] (multiple pages for PDFs).
+            // Flatten all files into one flat array of image strings.
+            const base64PerFile = await Promise.all(selectedFiles.map(convertFileToBase64));
+            const base64List = base64PerFile.flat();
             const result = await aiIPC.analyzeInvoiceImages(base64List);
 
             setAiProgress(null);

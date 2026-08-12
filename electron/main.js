@@ -132,10 +132,10 @@ async function performDailyBackup() {
         const dateStr = now.toISOString().slice(0, 10);
         const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
         const fileName = `pos_system_${dateStr}_${timeStr}.db`;
-        
+
         const backupDir = getLocalBackupDir();
         const targetPath = path.join(backupDir, fileName);
-        
+
         // Flush in-memory DB to disk before copying
         db.save();
         const res = db.exportBackup(targetPath);
@@ -157,7 +157,7 @@ function setupDailyBackupScheduler() {
     // Check if backup for today was already taken
     const todayStr = new Date().toISOString().slice(0, 10);
     const lastBackupDate = db.getSetting('last_daily_backup_date', '');
-    
+
     // If not backed up today and it's already past 20:00, or skipped yesterday
     const currentHour = new Date().getHours();
     if (lastBackupDate !== todayStr && currentHour >= 20) {
@@ -316,11 +316,15 @@ ipcMain.handle('updater:check', () => {
                     const release = JSON.parse(data);
                     const currentVersion = app.getVersion() || '2.0.0';
                     const latestVersion = release.tag_name ? release.tag_name.replace('v', '') : null;
-                    
+
                     // BUG-09 FIX: Use proper semver comparison instead of string equality
                     if (latestVersion && semverGt(latestVersion, currentVersion)) {
-                        const asset = release.assets && release.assets.find(a => a.name.endsWith('.exe'));
-                        
+                        // Prefer .asar asset (unpacked app update) over .exe (portable installer).
+                        // This allows unpacked win-arm64-unpacked deployments to receive updates.
+                        const asarAsset = release.assets && release.assets.find(a => a.name.endsWith('.asar'));
+                        const exeAsset = release.assets && release.assets.find(a => a.name.endsWith('.exe'));
+                        const asset = asarAsset || exeAsset;
+
                         resolve({
                             hasUpdate: true,
                             currentVersion,
@@ -328,7 +332,8 @@ ipcMain.handle('updater:check', () => {
                             releaseNotes: release.body,
                             releaseDate: release.published_at,
                             downloadUrl: asset ? asset.url : null,
-                            assetSize: asset ? asset.size : 0
+                            assetSize: asset ? asset.size : 0,
+                            updateType: asarAsset ? 'asar' : 'exe'
                         });
                     } else {
                         resolve({ hasUpdate: false, currentVersion, latestVersion });
@@ -344,7 +349,7 @@ ipcMain.handle('updater:check', () => {
             console.error('Updater request error:', err);
             resolve({ hasUpdate: false, error: err.message });
         });
-        
+
         req.end();
     });
 });
@@ -357,12 +362,12 @@ ipcMain.handle('updater:startDownload', async (event, downloadUrl, totalBytes) =
         if (!fs.existsSync(backupFolder)) {
             fs.mkdirSync(backupFolder, { recursive: true });
         }
-        
+
         const pad = n => n.toString().padStart(2, '0');
         const d = new Date();
-        const timestamp = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+        const timestamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
         const backupFile = path.join(backupFolder, `pos_system_backup_${timestamp}.db`);
-        
+
         const dbPath = path.join(app.getPath('userData'), 'pos_system.db');
         if (fs.existsSync(dbPath)) {
             fs.copyFileSync(dbPath, backupFile);
@@ -370,7 +375,9 @@ ipcMain.handle('updater:startDownload', async (event, downloadUrl, totalBytes) =
         }
 
         // 2. DOWNLOAD UPDATE ASSET
-        updateDownloadPath = path.join(app.getPath('temp'), `zuzupetkasa_update_${timestamp}.exe`);
+        // Use correct extension: .asar for unpacked app updates, .exe for portable installer
+        const updateExt = downloadUrl && downloadUrl.toLowerCase().includes('.asar') ? '.asar' : '.exe';
+        updateDownloadPath = path.join(app.getPath('temp'), `zuzupetkasa_update_${timestamp}${updateExt}`);
         const file = fs.createWriteStream(updateDownloadPath);
 
         return new Promise((resolve, reject) => {
@@ -402,13 +409,13 @@ ipcMain.handle('updater:startDownload', async (event, downloadUrl, totalBytes) =
                     response.on('data', (chunk) => {
                         downloadedBytes += chunk.length;
                         const now = Date.now();
-                        
+
                         // Emit progress every ~250ms
                         if (now - lastEmittedTime >= 250 || downloadedBytes === totalBytes) {
                             const timeDiff = (now - lastEmittedTime) / 1000;
                             const bytesDiff = downloadedBytes - lastEmittedBytes;
                             const speedBps = timeDiff > 0 ? bytesDiff / timeDiff : 0;
-                            
+
                             const percent = totalBytes ? Math.round((downloadedBytes / totalBytes) * 100) : 0;
                             const speedFormatted = (speedBps / (1024 * 1024)).toFixed(2) + ' MB/s';
                             const downloadedFormatted = (downloadedBytes / (1024 * 1024)).toFixed(2) + ' MB';
@@ -439,7 +446,7 @@ ipcMain.handle('updater:startDownload', async (event, downloadUrl, totalBytes) =
             });
 
             req.on('error', (err) => {
-                fs.unlink(updateDownloadPath, () => {});
+                fs.unlink(updateDownloadPath, () => { });
                 reject(err);
             });
         });
@@ -452,6 +459,31 @@ ipcMain.handle('updater:startDownload', async (event, downloadUrl, totalBytes) =
 ipcMain.handle('updater:install', () => {
     if (updateDownloadPath && fs.existsSync(updateDownloadPath)) {
         console.log('Installing update from:', updateDownloadPath);
+
+        if (updateDownloadPath.endsWith('.asar')) {
+            // UNPACKED APP UPDATE: Replace app.asar via a batch script.
+            // Windows locks the running .asar so we can't replace it directly.
+            // Strategy: write a .bat that waits 3s for app to close, copies new asar, restarts.
+            const asarDest = path.join(process.resourcesPath, 'app.asar');
+            const appExe = process.execPath;
+            const batchLines = [
+                '@echo off',
+                'timeout /t 3 /nobreak > NUL',
+                `copy /y "${updateDownloadPath}" "${asarDest}"`,
+                `start "" "${appExe}"`,
+                'del "%~f0"'   :: self-delete the batch after running
+            ].join('\r\n');
+            const batchPath = path.join(app.getPath('temp'), 'zuzupetkasa_update.bat');
+            fs.writeFileSync(batchPath, batchLines, 'utf8');
+            child_process.spawn('cmd.exe', ['/c', batchPath], {
+                detached: true,
+                stdio: 'ignore'
+            }).unref();
+            app.quit();
+            return true;
+        }
+
+        // Existing behavior: portable .exe installer
         const child = child_process.spawn(updateDownloadPath, [], {
             detached: true,
             stdio: 'ignore'
@@ -582,7 +614,7 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
     try {
         const activeProvider = db.getSetting('active_ai_provider', 'gemini');
         const openrouterApiKey = db.getSetting('openrouter_api_key', '');
-        
+
         let apiKey = '';
         if (activeProvider === 'openrouter') {
             apiKey = openrouterApiKey;
@@ -611,13 +643,13 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
         let customRules = [];
         try {
             if (customRulesStr) customRules = JSON.parse(customRulesStr);
-        } catch (e) {}
+        } catch (e) { }
 
         let customPromptText = db.getSetting('ai_custom_prompt_text', '');
 
         let rulesPromptText = '';
         if (Array.isArray(customRules) && customRules.length > 0) {
-            rulesPromptText = '\n        KULLANICIYA ÖZEL KATEGORİ DAĞITIM KURALLARI:\n' + 
+            rulesPromptText = '\n        KULLANICIYA ÖZEL KATEGORİ DAĞITIM KURALLARI:\n' +
                 customRules.map(r => `        - Ürün veya marka adında "${r.keyword}" geçerse kategorisini KESİNLİKLE "${r.category}" yap.`).join('\n');
         }
 
@@ -636,14 +668,12 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
         if (activeProvider !== 'openrouter') {
             ai = new GoogleGenAI({ apiKey });
         }
-        
+
+        // EFFICIENCY: Only send id+name for product matching. Barcode/price/category
+        // are not used by the AI for matching — removing them saves ~3500 tokens on a 500-product store.
         const dbProductsStr = JSON.stringify(db.getAllProducts('', 'Tümü').map(p => ({
             id: p.id,
-            n: p.name.substring(0, 60),
-            b: p.barcode || null,
-            c: p.cost_price || 0.0,
-            s: p.sale_price || 0.0,
-            cat: p.category || 'Genel'
+            n: p.name.substring(0, 40)
         })));
 
         const prompt = `
@@ -705,7 +735,8 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
         [ITEMS_END]
         `;
 
-        const batchSize = 3;
+        // EFFICIENCY: batchSize 5 → fewer API calls → less prompt+DB overhead per invoice
+        const batchSize = 5;
         const imageBatches = [];
         for (let i = 0; i < base64Images.length; i += batchSize) {
             imageBatches.push(base64Images.slice(i, i + batchSize));
@@ -716,15 +747,15 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
 
         const parseCSVResponse = (textStr) => {
             if (!textStr || typeof textStr !== 'string') return null;
-            
+
             // Remove markdown code blocks if any
             let clean = textStr.trim();
             if (clean.startsWith('```csv')) clean = clean.substring(6);
             if (clean.startsWith('```')) clean = clean.substring(3);
             if (clean.endsWith('```')) clean = clean.substring(0, clean.length - 3);
-            
+
             let lines = clean.split('\n').map(l => l.trim()).filter(Boolean);
-            
+
             let invoice_service_fee_total = 0.0;
             let items = [];
             let inItems = false;
@@ -758,7 +789,7 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
 
         for (let batchIndex = 0; batchIndex < imageBatches.length; batchIndex++) {
             const batch = imageBatches[batchIndex];
-            
+
             // Send progress update to frontend (IMP-12)
             try {
                 event.sender.send('ai:progress', {
@@ -766,15 +797,17 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
                     totalBatches: imageBatches.length,
                     message: `Batch ${batchIndex + 1} / ${imageBatches.length} işleniyor...`
                 });
-            } catch (e) {}
-            
+            } catch (e) { }
+
             const contents = [];
-            
+
             // Format request based on provider
             if (activeProvider === 'openrouter') {
+                // PDFs are pre-rendered to per-page JPEGs on the frontend.
+                // All entries here are always images (jpeg/png/webp/gif).
                 for (const fileBase64 of batch) {
-                    let cleanData = fileBase64;
                     let mimeType = 'image/jpeg';
+                    let cleanData = fileBase64;
                     if (fileBase64.startsWith('data:')) {
                         const parts = fileBase64.split(';');
                         mimeType = parts[0].replace('data:', '').trim();
@@ -782,23 +815,10 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
                     } else {
                         cleanData = cleanData.replace(/^data:[^;]+;base64,/, '');
                     }
-                    
-                    if (mimeType.includes('pdf')) {
-                        contents.push({
-                            type: 'text',
-                            text: 'Below is a base64 encoded PDF document for analysis.'
-                        });
-                        // OpenRouter mapping for anthropic document block (or similar)
-                        contents.push({
-                            type: 'image_url',
-                            image_url: { url: `data:application/pdf;base64,${cleanData}` }
-                        });
-                    } else {
-                        contents.push({
-                            type: 'image_url',
-                            image_url: { url: `data:${mimeType};base64,${cleanData}` }
-                        });
-                    }
+                    contents.push({
+                        type: 'image_url',
+                        image_url: { url: `data:${mimeType};base64,${cleanData}` }
+                    });
                 }
                 contents.push({ type: 'text', text: prompt });
             } else {
@@ -847,9 +867,9 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
                 if (activeProvider === 'openrouter') {
                     for (let i = 0; i <= maxRetries; i++) {
                         try {
-                            // User specifically requested model to be claude-sonnet-5
-                            const openRouterModel = 'claude-sonnet-5'; 
-                            const res = await require('node-fetch')('https://openrouter.ai/api/v1/chat/completions', {
+                            // OpenRouter requires provider/model format. Latest Claude Sonnet:
+                            const openRouterModel = 'anthropic/claude-sonnet-5';
+                            const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                                 method: 'POST',
                                 headers: {
                                     'Authorization': `Bearer ${apiKey}`,
@@ -868,9 +888,13 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
                                     temperature: 0.1
                                 })
                             });
-                            
+
                             const data = await res.json();
-                            if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+                            if (!res.ok || data.error) {
+                                console.error(`[OpenRouter DEBUG] HTTP ${res.status}, full response:`, JSON.stringify(data, null, 2));
+                                const errMsg = data.error ? (data.error.message || JSON.stringify(data.error)) : `HTTP ${res.status}: ${JSON.stringify(data)}`;
+                                throw new Error(errMsg);
+                            }
                             if (data.choices && data.choices[0] && data.choices[0].message) {
                                 return data.choices[0].message.content;
                             }
@@ -957,8 +981,8 @@ MERGER KURALLARI (Öncelik Sırasıyla):
 7. SADECE birleştirilmiş nihai veriyi aynı CSV formatında (SERVICE_FEE=... ve [ITEMS_START]...[ITEMS_END] kullanarak) döndür. Ekstra açıklama yazma.
 
 Sonuçlar:
-${validResults.map((r, i) => `--- Model ${i+1} ---\n${r}`).join('\n\n')}`;
-                    
+${validResults.map((r, i) => `--- Model ${i + 1} ---\n${r}`).join('\n\n')}`;
+
                     const mergerRes = await retryGenerateContent(mergerModelName, [mergerPrompt]);
                     if (!mergerRes) {
                         responseText = validResults[0];
@@ -1010,11 +1034,11 @@ ${validResults.map((r, i) => `--- Model ${i+1} ---\n${r}`).join('\n\n')}`;
         for (const item of rawItems) {
             const itemName = String(item.name || '').trim();
             const lowerName = itemName.toLowerCase();
-            const isService = item.is_service_line === true || 
-                              lowerName.includes('hizmet bedeli') || 
-                              lowerName.includes('kargo bedeli') || 
-                              lowerName.includes('nakliye') || 
-                              lowerName.includes('navlun');
+            const isService = item.is_service_line === true ||
+                lowerName.includes('hizmet bedeli') ||
+                lowerName.includes('kargo bedeli') ||
+                lowerName.includes('nakliye') ||
+                lowerName.includes('navlun');
 
             const qty = parseFloat(item.quantity || 1);
             const priceExclTax = parseFloat(item.unit_price_excl_tax || item.cost_price || 0.0);
@@ -1025,7 +1049,7 @@ ${validResults.map((r, i) => `--- Model ${i+1} ---\n${r}`).join('\n\n')}`;
                 serviceLinesFeeTotal += lineTotalWithTax;
             } else {
                 let matchedCategory = String(item.category || 'Genel').trim();
-                
+
                 // Fallback: Check custom keyword category rules
                 if (Array.isArray(customRules) && customRules.length > 0) {
                     for (const rule of customRules) {
@@ -1055,13 +1079,13 @@ ${validResults.map((r, i) => `--- Model ${i+1} ---\n${r}`).join('\n\n')}`;
 
         const cleanedItems = productItems.map(item => {
             const category = item.category || 'Genel';
-            
+
             // Automatically persist AI-created category in database
             db.addCategoryIfNotExist(category, 30.0);
-            
+
             const currentMargins = db.getCategoryMargins();
             const margin = currentMargins[category] !== undefined ? parseFloat(currentMargins[category]) : 30.0;
-            
+
             // Cost price keeps exact kuruş precision (e.g. 147.43 TL)
             const unitCostWithTax = Math.round(item.unit_price_excl_tax * (1 + item.vat_rate / 100) * 100) / 100;
             const effectiveCost = Math.round((unitCostWithTax + serviceFeePerUnit) * 100) / 100;

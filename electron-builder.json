@@ -13,6 +13,7 @@
     "node_modules/sql.js/**/*",
     "node_modules/electron-serve/**/*",
     "node_modules/@google/genai/**/*",
+    "node_modules/pdfjs-dist/**/*",
     "!node_modules/@next/**/*",
     "!node_modules/@img/**/*",
     "!node_modules/sharp/**/*",
