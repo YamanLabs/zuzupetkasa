@@ -1,4 +1,4 @@
-import { Palette, Sun, Moon, SpeakerHigh as Volume2, SpeakerX as VolumeX, Database, DownloadSimple as Download, UploadSimple as Upload, Trash as Trash2 } from '@phosphor-icons/react';
+import { Palette, Sun, Moon, SpeakerHigh as Volume2, SpeakerX as VolumeX, Database, DownloadSimple as Download, UploadSimple as Upload, Trash as Trash2, Eye } from '@phosphor-icons/react';
 
 interface SettingsSystemProps {
     theme: 'cream' | 'dark';
@@ -156,46 +156,6 @@ export default function SettingsSystem({
                             <span>Yedek Dosyası Yükle</span>
                         </button>
                     </div>
-                </div>
-            </div>
-
-            {/* Auto Update / Güncelleme Section */}
-            <div className={`border rounded-2xl p-4 space-y-3.5 shadow-sm transition-colors duration-150 ${
-                isCream ? 'bg-white border-[#d8d1c2]' : 'bg-slate-900/90 border-slate-800'
-            }`}>
-                <div className="flex items-center space-x-2 pb-2">
-                    <Download strokeWidth={2} className="h-4 w-4 text-blue-500 dark:text-blue-400" />
-                    <h3 className={`font-black text-sm ${isCream ? 'text-slate-950' : 'text-slate-100 text-glow-sm'}`}>
-                        Yazılım Güncellemeleri
-                    </h3>
-                </div>
-                <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-                    <p className="text-[11px] font-bold text-slate-600 dark:text-slate-400 w-full sm:w-2/3">
-                        ZUZU PET Kasa POS yazılımının yeni bir versiyonu çıkıp çıkmadığını kontrol edebilirsiniz. Yeni sürüm varsa indirme ve yedekleme sihirbazı başlayacaktır.
-                    </p>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            // @ts-ignore
-                            if (window.electronAPI && window.electronAPI.updater) {
-                                // @ts-ignore
-                                window.electronAPI.updater.check().then((res: any) => {
-                                    if (!res.hasUpdate) {
-                                        alert(res.error ? `Hata: ${res.error}` : 'Zaten en güncel sürümü kullanıyorsunuz.');
-                                    } else {
-                                        // page.tsx useEffect will not automatically trigger this if already loaded, 
-                                        // so we could trigger a custom event or just alert to restart.
-                                        // Ideally we want to show UpdateModal, so we just dispatch a custom event.
-                                        window.dispatchEvent(new CustomEvent('open-update-modal', { detail: res }));
-                                    }
-                                });
-                            }
-                        }}
-                        className="w-full sm:w-1/3 bg-blue-600 hover:bg-blue-500 text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow transition active:scale-95"
-                    >
-                        <Download strokeWidth={2} className="h-4 w-4" />
-                        <span>Güncellemeleri Kontrol Et</span>
-                    </button>
                 </div>
             </div>
 

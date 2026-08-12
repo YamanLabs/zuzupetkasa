@@ -1,5 +1,5 @@
 import React from 'react';
-import { DownloadSimple as Download, UploadSimple as Upload, ShieldWarning as ShieldAlert } from '@phosphor-icons/react';
+import { DownloadSimple as Download, UploadSimple as Upload, ShieldWarning as ShieldAlert, Eye } from '@phosphor-icons/react';
 
 interface SettingsServiceProps {
     theme: 'cream' | 'dark';
@@ -12,6 +12,67 @@ export default function SettingsService({ theme, onExportBarcodes, onImportBarco
 
     return (
         <div className="space-y-4">
+            {/* Auto Update / Güncelleme Section */}
+            <div className={`border rounded-2xl p-4 space-y-3.5 shadow-sm transition-colors duration-150 ${
+                isCream ? 'bg-white border-[#d8d1c2]' : 'bg-slate-900/90 border-slate-800'
+            }`}>
+                <div className="flex items-center space-x-2 pb-2">
+                    <Download strokeWidth={2} className="h-4 w-4 text-blue-500 dark:text-blue-400" />
+                    <h3 className={`font-black text-sm ${isCream ? 'text-slate-950' : 'text-slate-100 text-glow-sm'}`}>
+                        Yazılım Güncellemeleri
+                    </h3>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+                    <p className="text-[11px] font-bold text-slate-600 dark:text-slate-400 w-full sm:w-1/2">
+                        ZUZU PET Kasa POS yazılımının yeni sürümünü kontrol edebilir veya güncelleme ekranının tasarımını önizleyebilirsiniz.
+                    </p>
+                    <div className="flex gap-2 w-full sm:w-1/2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                window.dispatchEvent(new CustomEvent('open-update-modal', {
+                                    detail: {
+                                        latestVersion: 'v1.0.4-preview',
+                                        releaseNotes: '- Tema Uyumu: Krem & Siyah Tema entegre edildi.\n- Performans: Hızlı ve hafif arayüz sağlandı.\n- Güvenlik: Otomatik veritabanı yedeği altyapısı aktif.',
+                                        releaseDate: new Date().toISOString(),
+                                        downloadUrl: '',
+                                        assetSize: 85000000
+                                    }
+                                }));
+                            }}
+                            className={`flex-1 font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 border transition active:scale-95 ${
+                                isCream
+                                    ? 'bg-[#faf8f2] hover:bg-slate-100 border-[#d8d1c2] text-slate-800'
+                                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                            }`}
+                        >
+                            <Eye strokeWidth={2} className="h-4 w-4" />
+                            <span>Önizleme</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                // @ts-ignore
+                                if (window.electronAPI && window.electronAPI.updater) {
+                                    // @ts-ignore
+                                    window.electronAPI.updater.check().then((res: any) => {
+                                        if (!res.hasUpdate) {
+                                            alert(res.error ? `Hata: ${res.error}` : 'Zaten en güncel sürümü kullanıyorsunuz.');
+                                        } else {
+                                            window.dispatchEvent(new CustomEvent('open-update-modal', { detail: res }));
+                                        }
+                                    });
+                                }
+                            }}
+                            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow transition active:scale-95"
+                        >
+                            <Download strokeWidth={2} className="h-4 w-4" />
+                            <span>Güncellemeleri Kontrol Et</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div className={`p-4 rounded-2xl border ${isCream ? 'bg-white border-[#d8d1c2]' : 'bg-slate-900/90 border-slate-800'}`}>
                 <div className="flex items-center space-x-3 mb-4">
                     <div className={`p-2 rounded-xl ${isCream ? 'bg-blue-100 text-blue-700' : 'bg-blue-900/30 text-blue-400'}`}>

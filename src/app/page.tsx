@@ -248,6 +248,7 @@ export default function POSPage() {
                 {/* Auto Update Modal */}
                 {showUpdateModal && updateInfo && (
                     <UpdateModal
+                        theme={theme}
                         latestVersion={updateInfo.latestVersion}
                         releaseNotes={updateInfo.releaseNotes}
                         releaseDate={updateInfo.releaseDate}
