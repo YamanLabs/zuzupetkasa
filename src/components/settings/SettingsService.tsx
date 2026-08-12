@@ -11,6 +11,21 @@ interface SettingsServiceProps {
 export default function SettingsService({ theme, onExportBarcodes, onImportBarcodes }: SettingsServiceProps) {
     const { showAlert } = useModal();
     const isCream = theme === 'cream';
+    const [currentVersion, setCurrentVersion] = React.useState<string>('1.6.0');
+
+    React.useEffect(() => {
+        if (typeof window !== 'undefined' && (window as any).electronAPI) {
+            if ((window as any).electronAPI.updater?.getVersion) {
+                (window as any).electronAPI.updater.getVersion().then((v: string) => {
+                    if (v) setCurrentVersion(v);
+                });
+            } else if ((window as any).electronAPI.updater?.check) {
+                (window as any).electronAPI.updater.check().then((res: any) => {
+                    if (res?.currentVersion) setCurrentVersion(res.currentVersion);
+                });
+            }
+        }
+    }, []);
 
     return (
         <div className="space-y-4">
@@ -18,11 +33,21 @@ export default function SettingsService({ theme, onExportBarcodes, onImportBarco
             <div className={`border rounded-2xl p-4 space-y-3.5 shadow-sm transition-colors duration-150 ${
                 isCream ? 'bg-white border-[#d8d1c2]' : 'bg-slate-900/90 border-slate-800'
             }`}>
-                <div className="flex items-center space-x-2 pb-2">
-                    <Download strokeWidth={2} className="h-4 w-4 text-blue-500 dark:text-blue-400" />
-                    <h3 className={`font-black text-sm ${isCream ? 'text-slate-950' : 'text-slate-100 text-glow-sm'}`}>
-                        Yazılım Güncellemeleri
-                    </h3>
+                <div className="flex items-center justify-between pb-2 border-b border-dashed border-slate-200/80 dark:border-slate-800/80">
+                    <div className="flex items-center space-x-2">
+                        <Download strokeWidth={2} className="h-4 w-4 text-blue-500 dark:text-blue-400" />
+                        <h3 className={`font-black text-sm ${isCream ? 'text-slate-950' : 'text-slate-100 text-glow-sm'}`}>
+                            Yazılım Güncellemeleri
+                        </h3>
+                    </div>
+                    <div className={`px-2.5 py-1 rounded-full text-xs font-black border flex items-center space-x-1.5 ${
+                        isCream 
+                            ? 'bg-blue-50 border-blue-200 text-blue-800' 
+                            : 'bg-blue-950/60 border-blue-800/80 text-blue-300'
+                    }`}>
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span>Mevcut Sürüm: v{currentVersion}</span>
+                    </div>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
                     <p className="text-[11px] font-bold text-slate-600 dark:text-slate-400 w-full sm:w-1/2">

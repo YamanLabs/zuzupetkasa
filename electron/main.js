@@ -291,6 +291,8 @@ function getGitHubToken() {
     return db.getSetting('github_pat_token', '') || process.env.GITHUB_PAT || '';
 }
 
+ipcMain.handle('app:getVersion', () => app.getVersion() || '1.6.0');
+
 ipcMain.handle('updater:check', () => {
     return new Promise((resolve) => {
         const ghToken = getGitHubToken();
