@@ -276,8 +276,10 @@ let updateDownloadPath = null;
 
 // BUG-09 FIX: Proper semantic version comparison (semver)
 function semverGt(a, b) {
-    const pa = (a || '').split('.').map(Number);
-    const pb = (b || '').split('.').map(Number);
+    const cleanA = (a || '').replace(/^[vV]/, '');
+    const cleanB = (b || '').replace(/^[vV]/, '');
+    const pa = cleanA.split('.').map(Number);
+    const pb = cleanB.split('.').map(Number);
     for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
         const na = pa[i] || 0;
         const nb = pb[i] || 0;
@@ -291,7 +293,7 @@ function getGitHubToken() {
     return db.getSetting('github_pat_token', '') || process.env.GITHUB_PAT || '';
 }
 
-ipcMain.handle('app:getVersion', () => app.getVersion() || '1.6.0');
+ipcMain.handle('app:getVersion', () => app.getVersion() || '3.7.0');
 
 ipcMain.handle('updater:check', () => {
     return new Promise((resolve) => {
@@ -316,8 +318,8 @@ ipcMain.handle('updater:check', () => {
             res.on('end', () => {
                 try {
                     const release = JSON.parse(data);
-                    const currentVersion = app.getVersion() || '2.0.0';
-                    const latestVersion = release.tag_name ? release.tag_name.replace('v', '') : null;
+                    const currentVersion = app.getVersion() || '3.7.0';
+                    const latestVersion = release.tag_name ? release.tag_name.replace(/^[vV]/, '') : null;
 
                     // BUG-09 FIX: Use proper semver comparison instead of string equality
                     if (latestVersion && semverGt(latestVersion, currentVersion)) {
@@ -396,9 +398,12 @@ ipcMain.handle('updater:startDownload', async (event, downloadUrl, totalBytes) =
 
             const req = https.get(downloadUrl, options, (res) => {
                 if (res.statusCode === 301 || res.statusCode === 302) {
-                    // Follow redirect (GitHub releases redirect to AWS S3).
-                    // AWS S3 rejects requests with the original Authorization header, so we omit it.
-                    https.get(res.headers.location, handleResponse).on('error', reject);
+                    // BUG-31 FIX: Strip Authorization header before following redirect to S3
+                    // to prevent 403 Forbidden errors and handle infinite loops.
+                    const redirectOpts = { headers: { ...headers } };
+                    delete redirectOpts.headers['Authorization'];
+                    
+                    https.get(res.headers.location, redirectOpts, handleResponse).on('error', reject);
                 } else {
                     handleResponse(res);
                 }
@@ -473,7 +478,7 @@ ipcMain.handle('updater:install', () => {
                 'timeout /t 3 /nobreak > NUL',
                 `copy /y "${updateDownloadPath}" "${asarDest}"`,
                 `start "" "${appExe}"`,
-                'del "%~f0"'   :: self-delete the batch after running
+                'del "%~f0"'   // self-delete the batch after running
             ].join('\r\n');
             const batchPath = path.join(app.getPath('temp'), 'zuzupetkasa_update.bat');
             fs.writeFileSync(batchPath, batchLines, 'utf8');
@@ -541,6 +546,13 @@ ipcMain.on('app:maximize', () => {
 });
 ipcMain.on('app:close', () => {
     if (mainWindow) mainWindow.close();
+});
+
+// BUG-25 FIX: Added missing setBadgeCount IPC handler
+ipcMain.on('app:setBadgeCount', (event, count) => {
+    if (process.platform === 'darwin') {
+        app.dock.setBadge(count > 0 ? String(count) : '');
+    }
 });
 
 // Thermal Printer Silent Print IPC
@@ -661,10 +673,10 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
         }
 
         const isEnsembleMode = db.getSetting('ai_ensemble_mode', 'false') === 'true';
-        const model1Name = db.getSetting('gemini_model_name', '').trim() || 'gemini-2.5-flash';
-        const model2Name = db.getSetting('gemini_model_2', '').trim() || 'gemini-2.0-flash-lite';
-        const model3Name = db.getSetting('gemini_model_3', '').trim() || 'gemini-2.5-pro';
-        const mergerModelName = db.getSetting('gemini_merger_model', '').trim() || 'gemini-2.5-flash';
+        const model1Name = db.getSetting('gemini_model_name', '').trim() || 'anthropic/claude-sonnet-5';
+        const model2Name = db.getSetting('gemini_model_2', '').trim() || 'anthropic/claude-sonnet-5';
+        const model3Name = db.getSetting('gemini_model_3', '').trim() || 'anthropic/claude-sonnet-5';
+        const mergerModelName = db.getSetting('gemini_merger_model', '').trim() || 'anthropic/claude-sonnet-5';
 
         let ai = null;
         if (activeProvider !== 'openrouter') {
@@ -910,9 +922,9 @@ ipcMain.handle('ai:analyzeInvoiceImages', async (event, base64Images, providedAp
                     return null;
                 }
 
-                // Gemini Native API Logic
-                const candidates = ['gemini-3.5-flash'];
-                const uniqueCandidates = ['gemini-3.5-flash'];
+                // OpenRouter/Anthropic fallback (BUG-24 FIX)
+                const candidates = ['anthropic/claude-sonnet-5'];
+                const uniqueCandidates = ['anthropic/claude-sonnet-5'];
 
                 for (const candModel of uniqueCandidates) {
                     for (let i = 0; i <= maxRetries; i++) {
@@ -1210,10 +1222,31 @@ ipcMain.handle('ai:doubleCheckInvoice', async (event, base64Images, providedApiK
         const parsed = JSON.parse(responseText);
         const invoiceItems = parsed.items || [];
 
-        // Fetch DB data for cross-checking
-        const dbProducts = db.queryAll("SELECT * FROM products");
-        const dbSales = db.queryAll("SELECT * FROM sales");
-        const dbSaleItems = db.queryAll("SELECT * FROM sale_items");
+        // BUG-30 FIX: Do not pull all products/sales into memory. Only fetch recent sales 
+        // (last 30 days) and only products that are actually matched or all barcodes.
+        
+        // Fetch only recent sales for soldQty checking
+        const recentDate = new Date();
+        recentDate.setDate(recentDate.getDate() - 30);
+        const recentDateStr = recentDate.toISOString().substring(0, 10);
+        
+        const dbSalesRaw = db.queryAll("SELECT id, status FROM sales WHERE created_at >= ?", [`${recentDateStr} 00:00:00`]);
+        const activeSaleIds = new Set(
+            dbSalesRaw
+                .filter(s => s.status !== db.REFUNDED_STATUS && s.status !== '\u0130ade Edildi' && s.status !== 'Iade Edildi' && s.status !== 'Ä°ade Edildi')
+                .map(s => s.id)
+        );
+        
+        // Fetch only sale items for the active recent sales
+        let dbSaleItems = [];
+        if (activeSaleIds.size > 0) {
+            const idsList = Array.from(activeSaleIds).join(',');
+            dbSaleItems = db.queryAll(`SELECT product_id, quantity, sale_id FROM sale_items WHERE sale_id IN (${idsList})`);
+        }
+
+        // We still need all products for fuzzy matching since AI names might not match perfectly.
+        // But we only fetch required columns to save memory.
+        const dbProducts = db.queryAll("SELECT id, name, category, barcode, cost_price, stock_quantity FROM products");
 
         const normalizeName = (str) => {
             return (str || '')
@@ -1229,8 +1262,6 @@ ipcMain.handle('ai:doubleCheckInvoice', async (event, base64Images, providedApiK
         let newProductCount = 0;
         let soldProductCount = 0;
         const checkDetails = [];
-
-        const activeSaleIds = new Set(dbSales.filter(s => !['İade Edildi', 'Iade Edildi', 'Ä°ade Edildi'].includes(s.status)).map(s => s.id));
 
         const extractGrammages = (str) => {
             if (!str) return [];

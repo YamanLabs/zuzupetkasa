@@ -302,6 +302,10 @@ export function useAIAnalysis({ customRules, overwriteInvoicePrices = true }: Us
                     }
                     if (!matched) {
                         matched = findExistingMatch(item.name, item.barcode);
+                        // BUG-33 FIX: Override matched_product_id if frontend fuzzy search found a match
+                        if (matched) {
+                            item.matched_product_id = matched.id;
+                        }
                     }
                     const catName = normalizeCategoryName(item.category, item.name);
 

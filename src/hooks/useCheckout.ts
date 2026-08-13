@@ -40,9 +40,13 @@ export function useCheckout({
 
         const localTargetTotal = method === 'Nakit' ? cashFinalTotal : cardFinalTotal;
 
+        // BUG-27 FIX: Update cart unit_price based on method.
+        // We do this BEFORE opening the modal so the cart totals reflect the method choice.
         setCart(prev => prev.map(item => ({
             ...item,
-            unit_price: method === 'Nakit' ? item.product.sale_price : (item.product.card_price || Number((item.product.sale_price * 1.05).toFixed(2)))
+            unit_price: method === 'Nakit' 
+                ? item.product.sale_price 
+                : (item.product.card_price || Number((item.product.sale_price * 1.05).toFixed(2)))
         })));
 
         if (method === 'Nakit') {

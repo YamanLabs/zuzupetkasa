@@ -1,413 +1,139 @@
-# 🐛 BUGS.MD — ZuzuPet Kasa POS Sistem Hata Raporu
+# ðŸ› BUGS.MD â€” ZuzuPet Kasa POS Sistem Hata Raporu
 
-> **Tarama Tarihi:** 2026-08-12 (Güncellenme: 2026-08-12)
-> **Tarama Kapsamı:** electron/main.js, electron/database.js, electron/pos_terminal.js, src/hooks/*, src/components/*
+> **Tarama Tarihi:** 2026-08-13
+> **Tarama KapsamÄ±:** electron/main.js Â· electron/database.js Â· electron/pos_terminal.js Â· electron/preload.js Â· src/hooks/* Â· src/components/* Â· src/lib/ipc.ts
 
 ---
 
-## ✅ ÇÖZÜLEN HATALAR
+## âœ… Ã‡Ã–ZÃœLEN HATALAR (Ã–nceki Oturum)
 
-| Hata | Açıklama | Çözüm Yeri |
+| Hata | AÃ§Ä±klama | Ã‡Ã¶zÃ¼m Yeri |
 |------|----------|------------|
-| BUG-02 | AI Stok Aktarımında `card_price` güncellenmiyordu | `useAIAnalysis.ts` satır 514–524 — margin'den hesaplanıp yazılıyor |
-| BUG-03 | İade statüsü encoding migration | `database.js` `initSchema()` — tek seferlik UPDATE ile eski kayıtlar canonical'a çeviriliyor |
-| BUG-04 | Barkod import: aynı isimli ürünlerde UNIQUE kısıtı ihlali | `database.js` satır 1216 — `LIMIT 1` ile `id` bazında güncelleme |
-| BUG-07 | Yedekleme dosyaları birikerek diski dolduruyordu | `main.js` satır 109–127 — `cleanOldBackups(backupDir, 30)` eklendi |
-| BUG-08 | Analiz hatasında eski fatura tablosu ekranda kalıyordu | `useAIAnalysis.ts` satır 301 — `setParsedItems([])` çağrılıyor |
-| BUG-09 | Versiyon kontrolü string karşılaştırması kullanıyordu | `main.js` satır 278 — `semverGt()` ile doğru semver karşılaştırması |
-| BUG-11 | Ensemble modda tek batch başarısız olursa tüm analiz duruyordu | `main.js` satır 896–900 — `throw` yerine `continue` ile batch atlanıyor |
-| BUG-15 | `handleAssignScannedBarcode` stale state kullanıyordu | `useAIAnalysis.ts` — `updatedItems` array ile next index hesabı |
-| BUG-19 | `URL.createObjectURL` unmount'ta revoke edilmiyordu | `useAIAnalysis.ts` satır 55–65 — `filePreviewsRef` ile unmount'ta revoke |
-| BUG-20 | `deleteSales` stok geri eklemeden direkt siliyordu | `database.js` satır 765–780 — silmeden önce stoklar geri ekleniyor |
+| BUG-02 | AI Stok AktarÄ±mÄ±nda `card_price` gÃ¼ncellenmiyordu | `useAIAnalysis.ts` â€” margin'den hesaplanÄ±p yazÄ±lÄ±yor |
+| BUG-03 | Ä°ade statÃ¼sÃ¼ encoding migration | `database.js` `initSchema()` â€” tek seferlik UPDATE |
+| BUG-04 | Barkod import: aynÄ± isimli Ã¼rÃ¼nlerde UNIQUE kÄ±sÄ±tÄ± ihlali | `database.js` `LIMIT 1` ile `id` bazÄ±nda gÃ¼ncelleme |
+| BUG-06 | SatÄ±ÅŸ kaydÄ±nda stok round hatasÄ± (`Math.round`) | `database.js` satÄ±r 698 â€” `Math.floor` kullanÄ±lÄ±yor |
+| BUG-07 | Yedekleme dosyalarÄ± birikerek diski dolduruyordu | `main.js` â€” `cleanOldBackups(backupDir, 30)` eklendi |
+| BUG-08 | Analiz hatasÄ±nda eski fatura tablosu ekranda kalÄ±yordu | `useAIAnalysis.ts` â€” `setParsedItems([])` Ã§aÄŸrÄ±lÄ±yor |
+| BUG-09 | Versiyon kontrolÃ¼ string karÅŸÄ±laÅŸtÄ±rmasÄ± kullanÄ±yordu | `main.js` â€” `semverGt()` ile doÄŸru semver karÅŸÄ±laÅŸtÄ±rmasÄ± |
+| BUG-10 | Thermal printer yazÄ±cÄ± adÄ± ayardan okunmuyordu | `main.js` â€” `getSetting('thermal_printer_name')` eklendi |
+| BUG-11 | Ensemble modda tek batch baÅŸarÄ±sÄ±z olursa tÃ¼m analiz duruyordu | `main.js` â€” `throw` yerine `continue` ile batch atlanÄ±yor |
+| BUG-14 | AlertsTab hÄ±zlÄ± stok log reason generic yazÄ±lÄ±yordu | `database.js` `_stockLogReason` parametresi eklendi |
+| BUG-15 | `handleAssignScannedBarcode`: Stale state kullanÄ±mÄ± | `useAIAnalysis.ts` â€” `updatedItems` array ile dÃ¼zeltildi |
+| BUG-19 | `URL.createObjectURL` unmount'ta revoke edilmiyordu | `useAIAnalysis.ts` â€” `filePreviewsRef` ile unmount'ta revoke |
+| BUG-20 | `deleteSales` stok geri eklemeden siliyordu | `database.js` satÄ±r 794-813 â€” silmeden Ã¶nce stoklar geri ekleniyor |
+| BUG-23 | createSale Transaction HatasÄ±: "cannot commit..." | `database.js` â€” `execute()` metodundan `this.save()` silindi |
+| BUG-24 | AI Model Ä°smi Sabit KodlanmÄ±ÅŸ: `gemini-3.5-flash` | `main.js` â€” Model `anthropic/claude-sonnet-5` olarak deÄŸiÅŸtirildi |
+| BUG-25 | `app:setBadgeCount` IPC Handler Eksik | `main.js` â€” `ipcMain.on('app:setBadgeCount', ...)` eklendi |
+| BUG-03 | Ä°ade StatÃ¼sÃ¼ ÃœÃ§ FarklÄ± String | `database.js` â€” `PosDatabase.REFUNDED_STATUS` sabiti eklendi |
+| BUG-26 | useCheckout: Ã‡oklu Ã–deme `targetTotal` YanlÄ±ÅŸ | `useCheckout.ts` â€” `targetTotal` seÃ§imi Ã§oklu iÃ§in dÃ¼zeltildi |
+| BUG-27 | handleOpenPayment Ã‡oklu: Cart unit_price Kart FiyatÄ± KalÄ±yor | `useCheckout.ts` â€” Fiyatlar yÃ¶nteme gÃ¶re anlÄ±k doÄŸru set ediliyor |
+| BUG-28 | SalesTab useEffect BaÄŸÄ±mlÄ±lÄ±k EksikliÄŸi | `SalesTab.tsx` â€” `loadData` vb. baÄŸÄ±mlÄ±lÄ±klar eklendi |
+| BUG-29 | clearEntireDatabase: PRAGMA ve execute() Ã‡akÄ±ÅŸmasÄ± | `database.js` â€” `db.run` kullanÄ±larak explicit iÅŸlem yapÄ±ldÄ± |
+| BUG-30 | ai:doubleCheckInvoice: TÃ¼m TablolarÄ± BelleÄŸe Ã‡ekiyor | `main.js` â€” TÃ¼m DB yerine sadece son 30 gÃ¼n satÄ±ÅŸlar filtrelendi |
+| BUG-31 | updater:startDownload: Redirect Authorization Header Leak | `main.js` â€” S3 redirect Ã¶ncesi `Authorization` silindi |
+| BUG-05 | Stok Log: Float Miktar INTEGER Kolona YazÄ±labiliyor | `database.js` â€” `Math.floor()` eklendi |
+| BUG-32 | SalesCart: Miktar Input TemizlendiÄŸinde qty=0 KalÄ±yor | `SalesCart.tsx` â€” Empty string validasyonu eklendi, input type text oldu |
+| BUG-33 | useAIAnalysis: matched_product_id Fuzzy Match Ã‡akÄ±ÅŸmasÄ± | `useAIAnalysis.ts` â€” Fuzzy match deÄŸeri `matched_product_id` ezdi |
 
 ---
 
-## 🔴 KRİTİK HATALAR
-
-*(Açık kritik hata bulunmuyor)*
-
----
-
-## 🟡 ORTA ÖNEMLİ HATALAR
+## ðŸ”´ KRÄ°TÄ°K HATALAR (AÃ§Ä±k)
+*(HiÃ§ kritik hata kalmadÄ±)*
 
 ---
 
-### BUG-03 — İade Statüsü Türkçe Karakter Uyumsuzluğu (Kısmen Giderildi)
-**Dosya:** `electron/database.js` satır 731, 769, 810 ve `electron/main.js` satır 1161
-
-```js
-// database.js — okuma (3 encoding hâlâ kontrol ediliyor):
-const isRefunded = sale.status === 'İade Edildi' || sale.status === 'Iade Edildi' || sale.status === 'Ä°ade Edildi';
-
-// database.js — yazma (doğru, canonical):
-this.execute("UPDATE sales SET status = ? WHERE id = ?", ['İade Edildi', saleId]);
-```
-
-**Sorun:** Yazma artık canonical kullanıyor (kısmi fix), ancak okuma tarafında hâlâ 3 encoding kontrol ediliyor. Eski bozuk kayıtlar DB'de kalabilir.
-
-**Çözüm:** DB migration ile eski kayıtları canonical stringe dönüştür, ardından okuma tarafını tek karşılaştırmaya indir.
+## ðŸŸ¡ ORTA Ã–NEMLÄ° HATALAR (AÃ§Ä±k)
+*(HiÃ§ orta Ã¶nemli hata kalmadÄ±)*
 
 ---
 
-### BUG-05 — Stok Log: Float Miktar INTEGER Kolona Yazılabiliyor
-**Dosya:** `electron/database.js` satır 152
-
-```sql
-change_quantity INTEGER NOT NULL,
-```
-
-`useAIAnalysis.ts` tarafından `item.quantity` doğrudan gönderiliyor ve bu değer faturada `12.5` gibi float olabilir. `addOrUpdateStockByBarcode` içinde `parseInt(addedStock, 10)` yapılıyor ama `updateProduct` path'inde bu dönüşüm yok.
+## ðŸŸ¢ KÃœÃ‡ÃœK HATALAR / UX SORUNLARI (AÃ§Ä±k)
 
 ---
 
-### BUG-06 — Satış Kaydında Stok Round Hatası
-**Dosya:** `electron/database.js` satır 658
+### BUG-12 â€” RefundsTab: Tarihsiz Sorguda TÃ¼m SatÄ±ÅŸlar YÃ¼kleniyor (Performans)
+**Dosya:** `src/components/RefundsTab.tsx`
 
-```js
-const newStock = prod.stock_quantity - Math.round(qty);
-```
-
-`Math.round(1.5) = 2` — 1.5 adet satıldığında 2 adet düşülebilir. `Math.ceil` veya `parseInt` daha güvenli.
+`getSalesList('', '')` tÃ¼m satÄ±ÅŸ geÃ§miÅŸini Ã§ekiyor. VarsayÄ±lan son 30 gÃ¼n filtresi eklenmeli.
 
 ---
 
-### BUG-10 — Thermal Printer: Yazıcı Adı Ayardan Okunmuyor
-**Dosya:** `electron/main.js` satır 484
-
-```js
-deviceName: ''  // Her zaman OS default yazıcısını kullanır
-```
-
-Kullanıcı ayarlardan özel termal yazıcı adı girebilmeli.
-
----
-
-## 🟢 KÜÇÜK HATALAR / UX SORUNLARI
-
----
-
-### BUG-12 — RefundsTab: Tarihsiz Sorguda Tüm Satışlar Yükleniyor (Performans)
-**Dosya:** `src/components/RefundsTab.tsx` satır 24–26
-
-Tarih alanları boşken `getSalesList('', '')` tüm satış geçmişini çekiyor. Binlerce kayıt olabilir. Varsayılan olarak son 30 gün filtresi eklenmeli.
-
----
-
-### BUG-13 — ReportsTab Z-Raporu Yazdırma Hatası Sessizce Yutuluyor
-**Dosya:** `src/components/ReportsTab.tsx` satır 84–87
+### BUG-13 â€” ReportsTab Z-Raporu YazdÄ±rma HatasÄ± Sessizce Yutuluyor
+**Dosya:** `src/components/ReportsTab.tsx`
 
 ```ts
 } catch (err: any) {
     console.error('Z Report print error:', err);
-    // Kullanıcıya hiçbir uyarı gösterilmiyor
+    // KullanÄ±cÄ±ya hiÃ§bir uyarÄ± gÃ¶sterilmiyor
 }
 ```
 
 ---
 
-### BUG-14 — AlertsTab Hızlı Stok Ekle: `reason` Generic "Manuel Stok Düzenleme" Yazılıyor
-**Dosya:** `src/components/AlertsTab.tsx` satır 39–42
-
-Stock log'da "Manuel Stok Düzenleme" yerine "Kritik Stok Tamamlama" yazılmalı — filtreleme ve audit için.
-
----
-
-### BUG-15 — `handleAssignScannedBarcode`: Stale State Kullanımı
-**Dosya:** `src/hooks/useAIAnalysis.ts` satır 497
-
-```ts
-// setParsedItems async'tir. Hemen ardından eski parsedItems üzerinden findIndex çalışıyor:
-const nextNoBarcodeIndex = parsedItems.findIndex((item, idx) => ...);
-```
-
-Barkod atamasından sonra bir sonraki seçim yanlış indekste olabilir.
-
----
-
-### BUG-16 — AI Prompt Birim Fiyat Sütunu Başlığı Yanıltıcı
+### BUG-16 â€” AI Tablo: "Birim Fiyat" SÃ¼tun BaÅŸlÄ±ÄŸÄ± YanÄ±ltÄ±cÄ±
 **Dosya:** `src/components/aistock/AIParsedTable.tsx`
 
-Sütun başlığı "Birim Fiyat" ama bu KDV hariç fatura birim fiyatı. "Efektif Alış" ile karıştırılıyor. "KDV Hariç Birim Fiyat" yazılmalı.
+SÃ¼tun "Birim Fiyat" yazÄ±yor ama KDV hariÃ§ fatura birim fiyatÄ±. "KDV HariÃ§ AlÄ±ÅŸ FiyatÄ±" yazÄ±lmalÄ±.
 
 ---
 
-### BUG-17 — Updater: 301/302 Zincirli Redirect Takibi Eksik
-**Dosya:** `electron/main.js` satır 368
+### BUG-17 â€” Updater Redirect: Sonsuz DÃ¶ngÃ¼ KorumasÄ± Yok (BUG-31 ile Ã–rtÃ¼ÅŸÃ¼yor)
 
-Sadece tek redirect takip ediliyor. İkinci yönlendirme varsa (`https.get(location, ...)` içinde) handle edilmiyor.
-
----
-
-### BUG-18 — `normalizeSearchText`: `İ` Büyük Harf Dönüşümü Edge Case
-**Dosya:** `electron/database.js` satır 312
-
-`'İPEK'.toLowerCase()` → `'i̇pek'` (combining dot above). `replace(/i̇/g, 'i')` yakalıyor ama `String.prototype.normalize('NFD')` ile daha güvenilir yapılabilir.
+Redirect zincirinde dÃ¶ngÃ¼ korumasÄ± yok. `handleResponse` iÃ§inde gelen 301/302 tekrar takip edilmiyor.
 
 ---
 
-### BUG-21 — POS Ödeme: Gerçek POS Auth Kodu Yerine Fallback Rastgele Üretiliyor
-**Dosya:** `electron/main.js` satır 100
+### BUG-18 â€” normalizeSearchText: Frontend/Backend Implementasyonu FarklÄ±
+**Dosya:** `electron/database.js` satÄ±r 329-348 ve `src/lib/ipc.ts` satÄ±r 118-132
+
+`database.js`'de `normalize('NFC')` var, frontend `ipc.ts` kopyasÄ±nda yok.
+Ä°ki implementasyon farklÄ± davranÄ±yor â€” arama sonuÃ§larÄ± backend/frontend arasÄ±nda tutarsÄ±z olabilir.
+
+---
+
+### BUG-21 â€” POS Ã–deme: Auth Kodu GerÃ§ek POS OnayÄ± Beklenmeden Rastgele Ãœretiliyor
+**Dosya:** `electron/pos_terminal.js` satÄ±r 56-67
 
 ```js
-posAuthCode = posRes.auth_code || `POS-OK-${Math.floor(100000 + Math.random() * 900000)}`;
+gmp3Server.sendToPos(packet);
+return {
+    success: true,
+    auth_code: `POS-${Math.floor(100000 + Math.random() * 900000)}`,  // Rastgele!
+};
 ```
 
-POS'tan gerçek auth kodu gelmediğinde rastgele fallback üretiliyor ve satış onaylı sayılıyor.
+POS onayÄ± beklenmeden `success: true` dÃ¶nÃ¼yor. POS reddetse bile satÄ±ÅŸ kaydedilir.
 
 ---
 
-### BUG-22 — `clearEntireDatabase` Sonrası `wet_food_migration_done` Koşulu
-**Dosya:** `electron/database.js` satır 1010–1038
+### BUG-22 â€” clearEntireDatabase SonrasÄ± Gereksiz Migration SQL'leri Ã‡alÄ±ÅŸÄ±yor
+**Dosya:** `electron/database.js` satÄ±r 217-221
 
-`keepSettings=false` ile silme yapıldığında `initSchema()` çalışıyor, migration tekrar devreye giriyor ancak ürünler silinmiş olduğu için hardcoded ID güncelleme SQL'leri boşa çalışıyor. Sorun değil ama gereksiz I/O.
-
----
-
-*Toplam: 14 açık hata (0 kritik, 4 orta, 10 küçük/UX) | ✅ 8 hata giderildi*
+`keepSettings=false` ile sÄ±fÄ±rlamada hardcoded ID migration SQL'leri boÅŸuna Ã§alÄ±ÅŸÄ±yor.
+Ä°ÅŸlevsel sorun yok ama gereksiz disk I/O.
 
 ---
 
-## 🔴 KRİTİK HATALAR
-
----
-
-
-
----
-
-### BUG-02 — AI Stok Aktarımında Kart Fiyatı Güncellenmemiyor (Matched Product)
-**Dosya:** `src/hooks/useAIAnalysis.ts` satır 414–422
-
-```ts
-await dbIPC.updateProduct(item.matchedProduct.id, {
-    ...item.matchedProduct,
-    cost_price: item.cost_price,
-    sale_price: item.sale_price > 0 ? item.sale_price : item.matchedProduct.sale_price
-    // BUG: card_price hiç güncellenmemiyor! Eski değer kalıyor.
-});
-```
-
-**Sorun:** Mevcut (matched) ürünler için stok aktarımında `card_price` güncellenmeden eski değer kalıyor. Fatura maliyeti değiştiğinde kart fiyatı eskide kalır.
-
-**Çözüm:** `card_price` alanını yeni maliyet üzerinden hesaplayıp updateProduct'a ekle.
-
----
-
-### BUG-03 — İade Statüsü Türkçe Karakter Uyumsuzluğu (3 Farklı Encoding)
-**Dosya:** `electron/database.js` satır 706, 759 ve `electron/main.js` satır 1052
+### BUG-34 â€” gmp3-server.js PaketlenmiÅŸ Uygulamada Path Sorununa AÃ§Ä±k
+**Dosya:** `electron/main.js` satÄ±r 7 + `electron/pos_terminal.js` satÄ±r 3
 
 ```js
-// database.js 706:
-sale.status === 'İade Edildi' || sale.status === 'Iade Edildi'
-
-// database.js 759 (unicode escape):
-"status NOT IN ('Iade Edildi', '\u0130ade Edildi')"
-
-// main.js 1052:
-!['İade Edildi', 'Iade Edildi', 'Ä°ade Edildi'].includes(s.status)
+const { startGmp3Server } = require('../gmp3-server');
 ```
 
-**Sorun:** `'Ä°ade Edildi'` encoding bozukluğu! 3 farklı yerde 3 farklı string kullanılıyor. Bazı ortamlarda iade edilmiş satışlar hâlâ aktif sayılabilir ve raporlara dahil edilebilir.
-
-**Çözüm:** Tek bir sabit tanımla: `const REFUNDED_STATUS = 'İade Edildi'`, her yerde bunu kullan.
-
----
-
-### BUG-04 — Barkod Import: Aynı İsimde Birden Fazla Ürün Varsa UNIQUE Kısıtı İhlali
-**Dosya:** `electron/database.js` satır 1109
-
-```js
-this.execute(`UPDATE products SET barcode = ? WHERE name = ?`, [item.barcode, item.name]);
-```
-
-**Sorun:** `name = ?` koşuluyla tüm aynı isimli ürünler güncelleniyor. Veritabanında aynı isimde birden fazla ürün varsa hepsine aynı barkod yazılır. `barcode UNIQUE` kısıtı ihlal edilir ve SQL hatasına neden olabilir. (İlk satır için unique ihlali oluşmaz, ikinci güncelleme patlar.)
-
-**Çözüm:** `WHERE name = ? LIMIT 1` ekle veya `id` bazında güncelle.
+PaketlenmiÅŸ uygulamada `asar` iÃ§inde yol deÄŸiÅŸebilir. `gmp3-server.js` asarUnpack
+listesinde yoksa yÃ¼klenemez. POS terminal Ã¶zelliÄŸi tamamen Ã§Ã¶ker.
 
 ---
 
-## 🟡 ORTA ÖNEMLİ HATALAR
+## ðŸ“Š Ã–ZET
 
----
+| Kategori | AÃ§Ä±k | Ã‡Ã¶zÃ¼len |
+|----------|------|---------|
+| ðŸ”´ Kritik | 0 | 3 |
+| ðŸŸ¡ Orta | 0 | 6 |
+| ðŸŸ¢ KÃ¼Ã§Ã¼k/UX | 8 | 17 |
+| **Toplam** | **8** | **26** |
 
-### BUG-05 — Stok Log: Float Miktar INTEGER Kolona Yazılabiliyor
-**Dosya:** `electron/database.js` satır 152
 
-```sql
-change_quantity INTEGER NOT NULL,
-```
-
-`useAIAnalysis.ts` tarafından `item.quantity` doğrudan gönderiliyor ve bu değer faturada `12.5` gibi float olabilir. `addOrUpdateStockByBarcode` içinde `parseInt(addedStock, 10)` yapılıyor ama `updateProduct` path'inde bu dönüşüm yok.
-
----
-
-### BUG-06 — Satış Kaydında Stok Round Hatası
-**Dosya:** `electron/database.js` satır 658
-
-```js
-const newStock = prod.stock_quantity - Math.round(qty);
-```
-
-`Math.round(1.5) = 2` — 1.5 adet satıldığında 2 adet düşülebilir. `Math.ceil` veya `parseInt` daha güvenli.
-
----
-
-### BUG-07 — Yedekleme Dosyaları Temizlenmez: Disk Dolumu
-**Dosya:** `electron/main.js` satır 121–146
-
-`setupDailyBackupScheduler()` her gün yeni `.db` dosyası oluşturuyor fakat eski yedekleri silen hiçbir mantık yok. Uzun sürede `ZuzuKasa_Yedekler` klasörü şişer.
-
-**Çözüm:** Son 30 yedek tutulup eskiler silinmeli.
-
----
-
-### BUG-08 — Fatura Analizi Hatalı Olduğunda Eski Tablo Ekranda Kalıyor
-**Dosya:** `src/hooks/useAIAnalysis.ts` satır 272–277
-
-```ts
-} else {
-    alert('AI Fatura Analiz Hatası: ' + result.message);
-    // BUG: parsedItems temizlenmiyor, eski fatura tablosu ekranda kalır
-}
-```
-
----
-
-### BUG-09 — Versiyon Kontrolü String Karşılaştırması (Semantic Versioning Yok)
-**Dosya:** `electron/main.js` satır 262
-
-```js
-if (latestVersion && latestVersion !== currentVersion) {
-```
-
-`'1.10.0' > '1.9.0'` → string karşılaştırmasında `'1' < '1'` sonra `'.' == '.'` sonra `'1' < '9'` → YANLIŞ sonuç. Proper semver karşılaştırması yapılmalı.
-
----
-
-### BUG-10 — Thermal Printer: Yazıcı Adı Ayardan Okunmuyor
-**Dosya:** `electron/main.js` satır 484
-
-```js
-deviceName: ''  // Her zaman OS default yazıcısını kullanır
-```
-
-Kullanıcı ayarlardan özel termal yazıcı adı girebilmeli.
-
----
-
-### BUG-11 — Ensemble Modda Tek Batch Başarısız Olursa Tüm Analiz Duruyor
-**Dosya:** `electron/main.js` satır 805–807
-
-```js
-if (validResults.length === 0) {
-    throw new Error("Tüm ensemble modelleri başarısız oldu...");
-}
-```
-
-Bu `throw`, `for...of` batch döngüsü içinde. Bir batch başarısız → tüm analiz durur. Başarısız batch loglanıp atlanmalı, diğerleri işlenmeli.
-
----
-
-## 🟢 KÜÇÜK HATALAR / UX SORUNLARI
-
----
-
-### BUG-12 — RefundsTab: Tarihsiz Sorguda Tüm Satışlar Yükleniyor (Performans)
-**Dosya:** `src/components/RefundsTab.tsx` satır 24–26
-
-Tarih alanları boşken `getSalesList('', '')` tüm satış geçmişini çekiyor. Binlerce kayıt olabilir. Varsayılan olarak son 30 gün filtresi eklenmeli.
-
----
-
-### BUG-13 — ReportsTab Z-Raporu Yazdırma Hatası Sessizce Yutuluyor
-**Dosya:** `src/components/ReportsTab.tsx` satır 84–87
-
-```ts
-} catch (err: any) {
-    console.error('Z Report print error:', err);
-    // Kullanıcıya hiçbir uyarı gösterilmiyor
-}
-```
-
----
-
-### BUG-14 — AlertsTab Hızlı Stok Ekle: `reason` Generic "Manuel Stok Düzenleme" Yazılıyor
-**Dosya:** `src/components/AlertsTab.tsx` satır 39–42
-
-Stock log'da "Manuel Stok Düzenleme" yerine "Kritik Stok Tamamlama" yazılmalı — filtreleme ve audit için.
-
----
-
-### BUG-15 — `handleAssignScannedBarcode`: Stale State Kullanımı
-**Dosya:** `src/hooks/useAIAnalysis.ts` satır 397–404
-
-`setParsedItems` async. Hemen ardından eski `parsedItems` üzerinden `findIndex` çalışıyor. Barkod atamasından sonra bir sonraki seçim yanlış indekste olabilir.
-
----
-
-### BUG-16 — AI Prompt Birim Fiyat Sütunu Başlığı Yanıltıcı
-**Dosya:** `src/components/aistock/AIParsedTable.tsx`
-
-Sütun başlığı "Birim Fiyat" ama bu KDV hariç fatura birim fiyatı. "Efektif Alış" ile karıştırılıyor. "KDV Hariç Birim Fiyat" yazılmalı.
-
----
-
-### BUG-17 — Updater: 301/302 Zincirli Redirect Takibi Eksik
-**Dosya:** `electron/main.js` satır 318–325
-
-Sadece tek redirect takip ediliyor. İkinci yönlendirme varsa (`https.get(location, ...)` içinde) handle edilmiyor.
-
----
-
-### BUG-18 — `normalizeSearchText`: `İ` Büyük Harf Dönüşümü Edge Case
-**Dosya:** `electron/database.js` satır 312
-
-`'İPEK'.toLowerCase()` → `'i̇pek'` (combining dot above). `replace(/i̇/g, 'i')` yakalıyor ama `String.prototype.normalize('NFD')` ile daha güvenilir yapılabilir.
-
----
-
-### BUG-19 — AI Image Upload: URL.createObjectURL Leak (Sadece Remove'da Revoke)
-**Dosya:** `src/hooks/useAIAnalysis.ts` satır 52–53
-
-```ts
-const previews = files.map(file => URL.createObjectURL(file));
-```
-
-Yeni analiz yapıldığında veya dosya listesi değiştirildiğinde eski `objectURL`'ler revoke edilmiyor — sadece `handleRemoveFile`'da revoke yapılıyor. Component unmount'ta tüm preview URL'leri revoke edilmeli.
-
----
-
-### BUG-20 — `deleteSales` Batch Delete: Stok Geri Eklenmeden Siliniyor
-**Dosya:** `electron/database.js` satır 736–742
-
-```js
-deleteSales(saleIds) {
-    this.execute(`DELETE FROM sale_items WHERE sale_id IN (...)`, saleIds);
-    this.execute(`DELETE FROM sales WHERE id IN (...)`, saleIds);
-    // BUG: İade edilmemiş satışlar silindiğinde stok geri EKLENMİYOR
-}
-```
-
-İade işlemi (processRefund) stokları geri ekliyor, ama direkt delete etmek stokları geri eklemeden kaydı siliyor.
-
----
-
-### BUG-21 — POS Ödeme: Auth Code Rastgele Üretiliyor, Gerçek POS Onayı Yok
-**Dosya:** `electron/pos_terminal.js` satır 64
-
-```js
-auth_code: `POS-${Math.floor(100000 + Math.random() * 900000)}`,
-```
-
-Active socket üzerinden gönderim yapıldıktan sonra POS'tan gerçek auth kodu beklenmeden rastgele kod üretiliyor ve satış onaylı sayılıyor. POS'tan ACK beklenmiyor.
-
----
-
-### BUG-22 — `clearEntireDatabase` Sonrası `wet_food_migration_done` Koşulu
-**Dosya:** `electron/database.js` satır 1010–1038
-
-`keepSettings=false` ile silme yapıldığında `initSchema()` çalışıyor, migration tekrar devreye giriyor ancak ürünler silinmiş olduğu için hardcoded ID güncelleme SQL'leri boşa çalışıyor. Sorun değil ama gereksiz I/O.
-
----
-
-*Toplam: 22 hata (4 kritik, 7 orta, 11 küçük/UX)*

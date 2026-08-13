@@ -129,16 +129,18 @@ export default function SalesCart({
                                 <Minus strokeWidth={2.5} className="h-3 w-3" />
                             </button>
                             <input
-                                type="number"
-                                min="1"
-                                value={item.quantity || ''}
+                                type="text" // BUG-33 FIX: Use text to avoid HTML5 number input constraints masking empty/invalid input
+                                value={item.quantity === 0 ? '' : item.quantity.toString()}
                                 onChange={(e) => {
-                                    const val = parseInt(e.target.value, 10);
-                                    if (!isNaN(val) && val > 0) {
-                                        onSetQuantity(item.product.id, val);
-                                    } else if (e.target.value === '') {
-                                        // Allow clearing input temporarily
+                                    const rawVal = e.target.value;
+                                    // BUG-32 FIX: Handle empty string properly
+                                    if (rawVal === '') {
                                         onSetQuantity(item.product.id, 0);
+                                        return;
+                                    }
+                                    const val = parseInt(rawVal, 10);
+                                    if (!isNaN(val) && val >= 0) {
+                                        onSetQuantity(item.product.id, val);
                                     }
                                 }}
                                 onBlur={() => {

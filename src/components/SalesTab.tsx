@@ -43,14 +43,14 @@ export default function SalesTab({ scannedBarcode, onResetScannedBarcode, theme 
         if (isActive) {
             searchState.loadData();
         }
-    }, [isActive]);
+    }, [isActive, searchState.loadData]);
 
     useEffect(() => {
         if (scannedBarcode && isActive) {
             searchState.handleBarcodeScanned(scannedBarcode);
             if (onResetScannedBarcode) onResetScannedBarcode();
         }
-    }, [scannedBarcode, isActive]);
+    }, [scannedBarcode, isActive, searchState.handleBarcodeScanned, onResetScannedBarcode]);
 
     // IMP-18: Auto-Focus Search Input on any non-input key press
     useEffect(() => {

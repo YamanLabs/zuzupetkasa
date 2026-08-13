@@ -11,7 +11,7 @@ interface SettingsServiceProps {
 export default function SettingsService({ theme, onExportBarcodes, onImportBarcodes }: SettingsServiceProps) {
     const { showAlert } = useModal();
     const isCream = theme === 'cream';
-    const [currentVersion, setCurrentVersion] = React.useState<string>('1.6.0');
+    const [currentVersion, setCurrentVersion] = React.useState<string>('3.7.0');
 
     React.useEffect(() => {
         if (typeof window !== 'undefined' && (window as any).electronAPI) {

@@ -31,11 +31,20 @@
     "icon": "public/icon.ico",
     "target": [
       {
-        "target": "portable",
+        "target": "nsis",
         "arch": ["x64", "arm64"]
       }
     ],
     "requestedExecutionLevel": "asInvoker"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "ZUZU PET Kasa POS",
+    "artifactName": "ZUZU_PET_Kasa_POS_Setup_${arch}.exe"
   },
   "mac": {
     "icon": "public/xuxu_logo.png",

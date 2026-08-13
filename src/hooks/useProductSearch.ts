@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { dbIPC, Product } from '@/lib/ipc';
 import { soundFX } from '@/lib/sound-effects';
 
@@ -35,7 +35,7 @@ export function useProductSearch(onProductSelected: (product: Product) => void) 
         }
     }, [selectedIndex]);
 
-    const loadData = async () => {
+    const loadData = useCallback(async () => {
         const [cats] = await Promise.all([
             dbIPC.getCategories()
         ]);
@@ -47,14 +47,14 @@ export function useProductSearch(onProductSelected: (product: Product) => void) 
             const prods = await dbIPC.getProducts(debouncedQuery, selectedCategory);
             setProducts(prods);
         }
-    };
+    }, [debouncedQuery, selectedCategory]);
 
     // Reload data when debounced query or category changes
     useEffect(() => {
         loadData();
-    }, [debouncedQuery, selectedCategory]);
+    }, [loadData]);
 
-    const handleBarcodeScanned = async (code: string) => {
+    const handleBarcodeScanned = useCallback(async (code: string) => {
         const cleanCode = code.trim();
         if (!cleanCode) return;
 
@@ -67,7 +67,7 @@ export function useProductSearch(onProductSelected: (product: Product) => void) 
         } else {
             soundFX.playError();
         }
-    };
+    }, [onProductSelected]);
 
     const handleSearchKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'ArrowDown') {

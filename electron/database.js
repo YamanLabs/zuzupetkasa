@@ -91,7 +91,10 @@ class PosDatabase {
         try {
             this.db.run(sql, params);
             const res = this.queryOne("SELECT last_insert_rowid() as id");
-            this.save();
+            // BUG-23 FIX: Do NOT call this.save() here.
+            // save() exports the db which in sql.js implicitly commits any open transaction,
+            // causing "cannot commit - no transaction is active" errors in createSale.
+            // Each public write method calls save() explicitly after all operations are done.
             return res ? res.id : 0;
         } catch (err) {
             console.error('SQL Exec Error:', err, sql, params);
@@ -455,12 +458,15 @@ class PosDatabase {
             ]
         );
 
+        // BUG-05 FIX: Math.floor to ensure INTEGER value in change_quantity column
         this.execute(
             `INSERT INTO stock_logs (product_id, product_name, change_quantity, new_stock, reason)
              VALUES (?, ?, ?, ?, ?)`,
-            [id, data.name, data.stock_quantity || 0, data.stock_quantity || 0, "Yeni Ürün Kaydı"]
+            [id, data.name, Math.floor(data.stock_quantity || 0), Math.floor(data.stock_quantity || 0), "Yeni Ürün Kaydı"]
         );
 
+        // BUG-23 FIX: Explicit save after all writes are done
+        this.save();
         return id;
     }
 
@@ -493,18 +499,23 @@ class PosDatabase {
             const diff = newStock - oldStock;
             // BUG-14 FIX: Allow callers to provide a custom reason via _stockLogReason
             const logReason = data._stockLogReason || "Manuel Stok Düzenleme";
+            // BUG-05 FIX: Math.floor to ensure INTEGER value in change_quantity column
             this.execute(
                 `INSERT INTO stock_logs (product_id, product_name, change_quantity, new_stock, reason)
                  VALUES (?, ?, ?, ?, ?)`,
-                [id, data.name, diff, newStock, logReason]
+                [id, data.name, Math.floor(diff), Math.floor(newStock), logReason]
             );
         }
 
+        // BUG-23 FIX: Explicit save after all writes are done
+        this.save();
         return true;
     }
 
     deleteProduct(id) {
         this.execute("DELETE FROM products WHERE id = ?", [id]);
+        // BUG-23 FIX: Explicit save after delete
+        this.save();
         return true;
     }
 
@@ -550,6 +561,8 @@ class PosDatabase {
         const nameVal = categoryName.trim();
         this.execute("DELETE FROM categories WHERE name = ?", [nameVal]);
         this.execute("UPDATE products SET category = 'Genel' WHERE category = ?", [nameVal]);
+        // BUG-23 FIX: Explicit save after category delete
+        this.save();
         return true;
     }
 
@@ -575,6 +588,8 @@ class PosDatabase {
             }
             this.updateCategoryProductPrices(nameVal, cashVal, cardVal);
         }
+        // BUG-23 FIX: Explicit save after all margin updates
+        this.save();
         return true;
     }
 
@@ -635,9 +650,13 @@ class PosDatabase {
 
         let total_amount = 0;
         let calculated_tax = 0;
-
-        // BUG-08 FIX: Use transaction to ensure data integrity during sale creation
-        this.execute('BEGIN TRANSACTION');
+        // Use direct db.run() for transaction control to bypass execute()'s save() call.
+        // execute() calls this.save() after every statement — including BEGIN TRANSACTION.
+        // Each subsequent INSERT/UPDATE inside the transaction also calls save(), which in
+        // sql.js causes the in-progress transaction to be committed prematurely, so that
+        // COMMIT later fails with "no transaction is active". Using db.run() directly avoids this.
+        try { this.db.run('ROLLBACK'); } catch(e) {}
+        this.db.run('BEGIN TRANSACTION');
         try {
             for (const item of cart_items) {
                 const qty = parseFloat(item.quantity);
@@ -649,57 +668,62 @@ class PosDatabase {
                 calculated_tax += itemTax;
             }
 
-        const final_amount = Math.max(0.0, total_amount - parseFloat(discount));
-        const tax_amount = providedTax !== undefined ? parseFloat(providedTax) : calculated_tax;
-        const pay1 = payment_amount_1 !== undefined ? parseFloat(payment_amount_1) : final_amount;
-        const receipt_no = this.generateReceiptNo();
+            const final_amount = Math.max(0.0, total_amount - parseFloat(discount));
+            const tax_amount = providedTax !== undefined ? parseFloat(providedTax) : calculated_tax;
+            const pay1 = payment_amount_1 !== undefined ? parseFloat(payment_amount_1) : final_amount;
+            const receipt_no = this.generateReceiptNo();
 
-        const saleId = this.execute(
-            `INSERT INTO sales (
-                receipt_no, total_amount, discount, final_amount, tax_amount,
-                payment_method, payment_amount_1, payment_method_2, payment_amount_2,
-                pos_auth_code, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                receipt_no, total_amount, discount, final_amount, tax_amount,
-                payment_method, pay1, payment_method_2, payment_amount_2,
-                pos_auth_code, "Tamamlandı"
-            ]
-        );
-
-        for (const item of cart_items) {
-            const pid = item.product_id;
-            const qty = parseFloat(item.quantity);
-            const unit_price = parseFloat(item.unit_price);
-            const item_total = qty * unit_price;
-            const vat_rate = parseFloat(item.vat_rate || 20.0);
-            const item_tax = item.tax_amount !== undefined ? parseFloat(item.tax_amount) : item_total - (item_total / (1.0 + (vat_rate / 100.0)));
-
-            this.execute(
-                `INSERT INTO sale_items (
-                    sale_id, product_id, product_name, quantity, unit_price,
-                    total_price, vat_rate, tax_amount
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [saleId, pid, item.product_name, qty, unit_price, item_total, vat_rate, item_tax]
+            // Run INSERT directly — inside a manual transaction, no save() between statements
+            this.db.run(
+                `INSERT INTO sales (
+                    receipt_no, total_amount, discount, final_amount, tax_amount,
+                    payment_method, payment_amount_1, payment_method_2, payment_amount_2,
+                    pos_auth_code, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    receipt_no, total_amount, discount, final_amount, tax_amount,
+                    payment_method, pay1, payment_method_2, payment_amount_2,
+                    pos_auth_code, "Tamamlandı"
+                ]
             );
+            const saleIdRow = this.queryOne("SELECT last_insert_rowid() as id");
+            const saleId = saleIdRow ? saleIdRow.id : 0;
 
-            // Update product stock
-            // BUG-06 FIX: Use Math.floor instead of Math.round to avoid over-deducting stock
-            // BUG-05 FIX: Ensure qty is integer for stock_logs (INTEGER column)
-            const prod = this.getProductById(pid);
-            if (prod) {
-                const deductQty = Math.floor(parseFloat(qty));
-                const newStock = prod.stock_quantity - deductQty;
-                this.execute("UPDATE products SET stock_quantity = ? WHERE id = ?", [newStock, pid]);
-                this.execute(
-                    `INSERT INTO stock_logs (product_id, product_name, change_quantity, new_stock, reason)
-                     VALUES (?, ?, ?, ?, ?)`,
-                    [pid, item.product_name, -deductQty, newStock, `Satış (${receipt_no})`]
+            for (const item of cart_items) {
+                const pid = item.product_id;
+                const qty = parseFloat(item.quantity);
+                const unit_price = parseFloat(item.unit_price);
+                const item_total = qty * unit_price;
+                const vat_rate = parseFloat(item.vat_rate || 20.0);
+                const item_tax = item.tax_amount !== undefined ? parseFloat(item.tax_amount) : item_total - (item_total / (1.0 + (vat_rate / 100.0)));
+
+                this.db.run(
+                    `INSERT INTO sale_items (
+                        sale_id, product_id, product_name, quantity, unit_price,
+                        total_price, vat_rate, tax_amount
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [saleId, pid, item.product_name, qty, unit_price, item_total, vat_rate, item_tax]
                 );
-            }
+
+                // Update product stock
+                // BUG-06 FIX: Use Math.floor instead of Math.round to avoid over-deducting stock
+                // BUG-05 FIX: Ensure qty is integer for stock_logs (INTEGER column)
+                const prod = this.getProductById(pid);
+                if (prod) {
+                    const deductQty = Math.floor(parseFloat(qty));
+                    const newStock = prod.stock_quantity - deductQty;
+                    this.db.run("UPDATE products SET stock_quantity = ? WHERE id = ?", [newStock, pid]);
+                    this.db.run(
+                        `INSERT INTO stock_logs (product_id, product_name, change_quantity, new_stock, reason)
+                         VALUES (?, ?, ?, ?, ?)`,
+                        [pid, item.product_name, -deductQty, newStock, `Satış (${receipt_no})`]
+                    );
+                }
             }
 
-            this.execute('COMMIT');
+            // Commit and persist to disk once — atomically
+            this.db.run('COMMIT');
+            this.save();
 
             const dateNow = new Date().toISOString().replace('T', ' ').substring(0, 19);
             return {
@@ -717,7 +741,10 @@ class PosDatabase {
                 created_at: dateNow
             };
         } catch (err) {
-            this.execute('ROLLBACK');
+            console.error("Sale creation failed. Original error:", err);
+            try { this.db.run('ROLLBACK'); } catch (rollbackErr) {
+                console.error("Rollback also failed:", rollbackErr);
+            }
             throw err;
         }
     }
@@ -741,11 +768,13 @@ class PosDatabase {
         return this.queryAll("SELECT * FROM sale_items WHERE sale_id = ?", [saleId]);
     }
 
+    // BUG-03 FIX: Single canonical refund status constant
+    static get REFUNDED_STATUS() { return '\u0130ade Edildi'; }  // 'İade Edildi'
+
     processRefund(saleId) {
         const sale = this.queryOne("SELECT * FROM sales WHERE id = ?", [saleId]);
-        // BUG-03 FIX: Use consistent refund status check covering all encoding variants
-        const isRefunded = sale && (sale.status === 'İade Edildi' || sale.status === 'Iade Edildi' || sale.status === 'Ä°ade Edildi');
-        if (!sale || isRefunded) {
+        // BUG-03 FIX: Use single canonical status check
+        if (!sale || sale.status === PosDatabase.REFUNDED_STATUS) {
             return false;
         }
 
@@ -757,32 +786,39 @@ class PosDatabase {
             if (prod) {
                 const newStock = prod.stock_quantity + qty;
                 this.execute("UPDATE products SET stock_quantity = ? WHERE id = ?", [newStock, pid]);
+                // BUG-05 FIX: Math.floor for INTEGER stock_logs column
                 this.execute(
                     `INSERT INTO stock_logs (product_id, product_name, change_quantity, new_stock, reason)
                      VALUES (?, ?, ?, ?, ?)`,
-                    [pid, item.product_name, qty, newStock, `İade (${sale.receipt_no})`]
+                    [pid, item.product_name, Math.floor(qty), Math.floor(newStock), `\u0130ade (${sale.receipt_no})`]
                 );
             }
         }
 
-        // BUG-03 FIX: Always write the canonical refund status string
-        this.execute("UPDATE sales SET status = ? WHERE id = ?", ['İade Edildi', saleId]);
+        this.execute("UPDATE sales SET status = ? WHERE id = ?", [PosDatabase.REFUNDED_STATUS, saleId]);
+        // BUG-23 FIX: Explicit save
+        this.save();
         return true;
     }
+
 
     deleteSale(saleId) {
         this.execute("DELETE FROM sale_items WHERE sale_id = ?", [saleId]);
         this.execute("DELETE FROM sales WHERE id = ?", [saleId]);
+        // BUG-23 FIX: Explicit save after delete
+        this.save();
         return true;
     }
 
     deleteSales(saleIds) {
+
         if (!Array.isArray(saleIds) || saleIds.length === 0) return true;
         // BUG-20 FIX: Restore stock before deleting non-refunded sales
         for (const saleId of saleIds) {
             const sale = this.queryOne("SELECT * FROM sales WHERE id = ?", [saleId]);
             if (!sale) continue;
-            const isRefunded = (sale.status === 'İade Edildi' || sale.status === 'Iade Edildi' || sale.status === 'Ä°ade Edildi');
+            // BUG-03 FIX: Use canonical status check
+            const isRefunded = (sale.status === PosDatabase.REFUNDED_STATUS);
             if (!isRefunded) {
                 // Restore stock for items in this non-refunded sale
                 const items = this.getSaleItems(saleId);
@@ -822,8 +858,8 @@ class PosDatabase {
             dateStr = new Date().toISOString().substring(0, 10);
         }
 
-        // BUG-03 FIX: Use all encoding variants to ensure refunded sales are excluded
-        const activeFilter = "status NOT IN ('İade Edildi', 'Iade Edildi', 'Ä°ade Edildi')";
+        // BUG-03 FIX: Use canonical single refund status
+        const activeFilter = `status != '${PosDatabase.REFUNDED_STATUS}'`;
         const summary = this.queryOne(`
             SELECT
                 COUNT(*) as total_sales_count,
@@ -1109,6 +1145,8 @@ class PosDatabase {
             }
         }
         this.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", [key, storeValue]);
+        // BUG-23 FIX: Explicit save after settings write
+        this.save();
         return true;
     }
 
@@ -1131,12 +1169,14 @@ class PosDatabase {
     }
 
     clearEntireDatabase(keepSettings = false) {
-        this.db.run("PRAGMA foreign_keys = OFF;");
-        this.execute("DELETE FROM sale_items");
-        this.execute("DELETE FROM sales");
-        this.execute("DELETE FROM stock_logs");
-        this.execute("DELETE FROM products");
-        this.execute("DELETE FROM categories");
+        // BUG-29 FIX: Use db.run() directly (no execute()) to avoid save() mid-operation.
+        // execute() no longer calls save(), but using db.run() keeps this explicit.
+        this.db.run("PRAGMA foreign_keys = OFF");
+        this.db.run("DELETE FROM sale_items");
+        this.db.run("DELETE FROM sales");
+        this.db.run("DELETE FROM stock_logs");
+        this.db.run("DELETE FROM products");
+        this.db.run("DELETE FROM categories");
 
         // Re-seed default categories on reset (including card_margin_percent)
         const defaultCats = [
@@ -1152,15 +1192,15 @@ class PosDatabase {
             ["Yatak", 35.0, 40.0]
         ];
         for (const [cName, cCash, cCard] of defaultCats) {
-            this.execute("INSERT OR IGNORE INTO categories (name, margin_percent, card_margin_percent) VALUES (?, ?, ?)", [cName, cCash, cCard]);
+            this.db.run("INSERT OR IGNORE INTO categories (name, margin_percent, card_margin_percent) VALUES (?, ?, ?)", [cName, cCash, cCard]);
         }
 
         if (!keepSettings) {
-            this.execute("DELETE FROM settings");
+            this.db.run("DELETE FROM settings");
             this.initSchema();
         }
 
-        this.db.run("PRAGMA foreign_keys = ON;");
+        this.db.run("PRAGMA foreign_keys = ON");
         this.save();
         return true;
     }
